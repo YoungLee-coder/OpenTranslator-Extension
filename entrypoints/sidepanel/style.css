@@ -1,0 +1,149 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  width: 100%;
+  overflow: hidden;
+}
+
+.sidepanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sidepanel-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+.panel-detected-lang {
+  margin-left: 0.35em;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted-foreground);
+}
+
+.lang-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.lang-bar-settings {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.lang-bar select {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.lang-bar .btn-icon:not(.lang-bar-settings) {
+  width: 32px;
+  height: 32px;
+}
+
+.sidepanel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.source-section,
+.target-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.source-section {
+  flex: 1;
+  border-bottom: 1px solid var(--rule);
+}
+
+.source-section textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  padding: 14px 16px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.625;
+  box-shadow: none;
+}
+
+.source-section textarea:focus {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.target-section {
+  flex: 1;
+  background: color-mix(in oklch, var(--muted) 35%, transparent);
+}
+
+.target-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.625;
+  color: var(--foreground);
+}
+
+.target-placeholder {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+}
+
+.target-cursor {
+  color: var(--primary);
+}
+
+.target-error {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--destructive);
+}
+
+.progress-bar {
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 30%;
+  background: var(--primary);
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
