@@ -10,6 +10,7 @@ import { formatApiError } from "@/lib/errors";
 import { sendBg } from "@/lib/messaging";
 import type { ExtensionState } from "@/lib/messaging";
 import { ensureHostPermission } from "@/lib/permissions";
+import { readExtensionState } from "@/lib/state";
 import { getDraftBaseUrl, setDraftBaseUrl } from "@/lib/storage";
 import type { PingResponse } from "@/types";
 import "./settings.css";
@@ -31,7 +32,6 @@ export default function SettingsView({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [state, setState] = useState<ExtensionState | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pingBusy, setPingBusy] = useState(false);
   const [error, setError] = useState("");
@@ -40,21 +40,25 @@ export default function SettingsView({
   const [pingBindings, setPingBindings] = useState<PingResponse["bindings"] | null>(null);
   const [pingService, setPingService] = useState("");
 
-  const refresh = useCallback(async () => {
-    const res = await sendBg<ExtensionState>({ type: "getState" });
-    if (res.ok && res.data) {
-      setState(res.data);
-      onStateChange?.(res.data);
-      if (res.data.baseUrl) {
-        setBaseUrl(res.data.baseUrl);
+  const applyState = useCallback(
+    async (data: ExtensionState) => {
+      setState(data);
+      onStateChange?.(data);
+      if (data.baseUrl) {
+        setBaseUrl(data.baseUrl);
       } else {
         const draft = await getDraftBaseUrl();
         if (draft) setBaseUrl(draft);
       }
-    }
-    setLoading(false);
-    return res.ok ? res.data : null;
-  }, [onStateChange]);
+    },
+    [onStateChange],
+  );
+
+  const refresh = useCallback(async () => {
+    const local = await readExtensionState();
+    await applyState(local);
+    return local;
+  }, [applyState]);
 
   const bound = state?.bound ?? false;
   const {
@@ -69,8 +73,16 @@ export default function SettingsView({
   });
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    void (async () => {
+      const local = await readExtensionState();
+      if (cancelled) return;
+      await applyState(local);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyState]);
 
   const clearMessages = () => {
     setError("");
@@ -214,15 +226,9 @@ export default function SettingsView({
     "animate-rise",
   ].join(" ");
 
-  if (loading) {
-    return (
-      <div className={rootClass}>
-        <div className="loading-state">
-          <span className="spinner" aria-hidden />
-          加载中…
-        </div>
-      </div>
-    );
+  // Wait for local storage only — no spinner / network gate.
+  if (!state) {
+    return <div className={rootClass} />;
   }
 
   const isDev = import.meta.env.DEV;

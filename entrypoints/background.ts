@@ -2,53 +2,51 @@ import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTra
 import { resolveExpertId } from "@/lib/experts";
 import { decodeModelKey } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn } from "@/lib/messaging";
+import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getPrefs, setAuth, setPrefs } from "@/lib/storage";
+import type { AiExpertsPublicResponse, TranslateModelsResponse } from "@/types";
 import { normalizeBaseUrl } from "@/lib/url";
 
 const SESSION_ALARM = "session-check";
 const SESSION_CHECK_MINUTES = 30;
+const CATALOG_TTL_MS = 5 * 60 * 1000;
 
-async function buildState(): Promise<ExtensionState> {
-  const auth = await getAuth();
-  const prefs = await getPrefs();
-  if (!auth) {
-    return {
-      bound: false,
-      sourceLang: prefs.sourceLang,
-      targetLang: prefs.targetLang,
-      modelKey: prefs.modelKey ?? null,
-      expertId: prefs.expertId ?? "general",
-    };
-  }
-  return {
-    bound: true,
-    baseUrl: auth.baseUrl,
-    user: auth.user,
-    sourceLang: prefs.sourceLang,
-    targetLang: prefs.targetLang,
-    modelKey: prefs.modelKey ?? null,
-    expertId: prefs.expertId ?? "general",
-  };
+type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
+
+let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
+let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
+
+function clearCatalogCaches() {
+  modelsCache = null;
+  expertsCache = null;
+}
+
+function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null {
+  if (!cache || cache.userId !== userId) return null;
+  if (Date.now() - cache.fetchedAt > CATALOG_TTL_MS) return null;
+  return cache.data;
 }
 
 async function verifyBound(): Promise<ExtensionState> {
   const auth = await getAuth();
-  if (!auth) return buildState();
+  if (!auth) return readExtensionState();
   try {
     const session = await me(auth.baseUrl, auth.token);
     if (!session.authenticated) {
       await clearAuth();
-      return buildState();
+      clearCatalogCaches();
+      return readExtensionState();
     }
     if (session.user) {
       await setAuth({ ...auth, user: session.user });
     }
-    return buildState();
+    return readExtensionState();
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       await clearAuth();
+      clearCatalogCaches();
     }
-    return buildState();
+    return readExtensionState();
   }
 }
 
@@ -75,6 +73,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           token: data.token,
           user: data.user,
         });
+        clearCatalogCaches();
         return { ok: true, data };
       }
       case "me": {
@@ -91,14 +90,17 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           }
         }
         await clearAuth();
+        clearCatalogCaches();
         return { ok: true };
       }
       case "clearAuth": {
         await clearAuth();
+        clearCatalogCaches();
         return { ok: true };
       }
       case "getState": {
-        const state = await verifyBound();
+        // Local storage only — session checks run via "me", alarms, and translate.
+        const state = await readExtensionState();
         return { ok: true, data: state };
       }
       case "getModels": {
@@ -106,7 +108,10 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
+        const cached = cacheFresh(modelsCache, auth.user.id);
+        if (cached) return { ok: true, data: cached };
         const data = await fetchModels(auth.baseUrl, auth.token);
+        modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
         return { ok: true, data };
       }
       case "getExperts": {
@@ -114,7 +119,10 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
+        const cached = cacheFresh(expertsCache, auth.user.id);
+        if (cached) return { ok: true, data: cached };
         const data = await fetchExperts(auth.baseUrl, auth.token);
+        expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
         return { ok: true, data };
       }
       case "setPrefs": {
@@ -124,7 +132,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           modelKey: request.modelKey,
           expertId: request.expertId,
         });
-        const state = await buildState();
+        const state = await readExtensionState();
         return { ok: true, data: state };
       }
       default:
@@ -206,6 +214,7 @@ export default defineBackground(() => {
         const session = await me(auth.baseUrl, auth.token);
         if (!session.authenticated) {
           await clearAuth();
+          clearCatalogCaches();
           port.postMessage({
             type: "error",
             error: "登录已过期，请重新登录",
@@ -265,6 +274,7 @@ export default defineBackground(() => {
         if (err instanceof ApiError) {
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
+            clearCatalogCaches();
             port.postMessage({
               type: "error",
               error: "登录已过期，请重新登录",

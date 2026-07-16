@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeftRight,
   Check,
@@ -7,14 +7,14 @@ import {
   Square,
   X,
 } from "lucide-react";
+import SettingsView from "@/components/SettingsView";
 import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
 import { isModelAvailabilityError } from "@/lib/experts";
 import { LANGUAGES, languageLabel } from "@/lib/languages";
 import { sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
-
-const SettingsView = lazy(() => import("@/components/SettingsView"));
+import { readExtensionState } from "@/lib/state";
 
 const DEBOUNCE_MS = 500;
 
@@ -27,7 +27,6 @@ function charCount(n: number) {
 export default function App() {
   const [view, setView] = useState<View>("translate");
   const [state, setState] = useState<ExtensionState | null>(null);
-  const [loading, setLoading] = useState(true);
   const [sourceText, setSourceText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
   const [translating, setTranslating] = useState(false);
@@ -39,12 +38,9 @@ export default function App() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
-    const res = await sendBg<ExtensionState>({ type: "getState" });
-    if (res.ok && res.data) {
-      setState(res.data);
-    }
-    setLoading(false);
-    return res.ok ? res.data : null;
+    const local = await readExtensionState();
+    setState(local);
+    return local;
   }, []);
 
   const { models, reload: reloadModels } = useModels({
@@ -53,8 +49,19 @@ export default function App() {
   });
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    void (async () => {
+      const local = await readExtensionState();
+      if (cancelled) return;
+      setState(local);
+      // Soft session check — does not block first paint.
+      const res = await sendBg<ExtensionState>({ type: "me" });
+      if (!cancelled && res.ok && res.data) setState(res.data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleStateChange = useCallback((next: ExtensionState) => {
     setState(next);
@@ -235,35 +242,20 @@ export default function App() {
     setView("settings");
   };
 
-  if (loading) {
-    return (
-      <div className="sidepanel">
-        <div className="loading-state">
-          <span className="spinner" aria-hidden />
-          加载中…
-        </div>
-      </div>
-    );
+  // First paint waits only for local storage (typically <10ms) — no spinner.
+  if (!state) {
+    return <div className="sidepanel" />;
   }
 
-  if (view === "settings" || !state?.bound) {
+  if (view === "settings" || !state.bound) {
     return (
       <div className="sidepanel">
-        <Suspense
-          fallback={
-            <div className="loading-state">
-              <span className="spinner" aria-hidden />
-              加载中…
-            </div>
-          }
-        >
-          <SettingsView
-            variant="sidepanel"
-            onBack={state?.bound ? () => setView("translate") : undefined}
-            onStateChange={handleStateChange}
-            onLoginSuccess={handleLoginSuccess}
-          />
-        </Suspense>
+        <SettingsView
+          variant="sidepanel"
+          onBack={state.bound ? () => setView("translate") : undefined}
+          onStateChange={handleStateChange}
+          onLoginSuccess={handleLoginSuccess}
+        />
       </div>
     );
   }
