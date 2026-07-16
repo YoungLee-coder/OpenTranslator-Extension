@@ -2,6 +2,7 @@ import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTra
 import { resolveExpertId } from "@/lib/experts";
 import { decodeModelKey } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn } from "@/lib/messaging";
+import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getPrefs, setAuth, setPrefs } from "@/lib/storage";
 import type { AiExpertsPublicResponse, TranslateModelsResponse } from "@/types";
@@ -91,11 +92,14 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         }
         await clearAuth();
         clearCatalogCaches();
+        if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
       case "clearAuth": {
+        const auth = await getAuth();
         await clearAuth();
         clearCatalogCaches();
+        if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
       case "getState": {
@@ -180,11 +184,16 @@ export default defineBackground(() => {
     }
   });
 
-  browser.runtime.onMessage.addListener((request: BgRequest) => {
+  browser.runtime.onMessage.addListener((request: BgRequest, sender) => {
+    if (sender.id !== browser.runtime.id) return;
     return handleMessage(request);
   });
 
   browser.runtime.onConnect.addListener((port) => {
+    if (port.sender?.id !== browser.runtime.id) {
+      port.disconnect();
+      return;
+    }
     if (port.name !== "translate") return;
 
     let abortController: AbortController | null = null;

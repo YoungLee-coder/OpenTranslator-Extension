@@ -1,9 +1,32 @@
+/** Resolve avatar to a same-origin URL under the bound instance; otherwise undefined. */
 export function resolveAvatarUrl(baseUrl: string, avatarUrl?: string): string | undefined {
-  if (!avatarUrl) return undefined;
-  if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
-    return avatarUrl;
+  if (!avatarUrl?.trim()) return undefined;
+
+  let resolved: URL;
+  try {
+    const base = new URL(baseUrl);
+    if (/^https?:\/\//i.test(avatarUrl)) {
+      resolved = new URL(avatarUrl);
+    } else {
+      const baseHref = base.href.endsWith("/") ? base.href : `${base.href}/`;
+      resolved = new URL(avatarUrl, baseHref);
+    }
+  } catch {
+    return undefined;
   }
-  return `${baseUrl.replace(/\/$/, "")}${avatarUrl}`;
+
+  if (resolved.username || resolved.password) return undefined;
+  if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return undefined;
+
+  let baseOrigin: string;
+  try {
+    baseOrigin = new URL(baseUrl).origin;
+  } catch {
+    return undefined;
+  }
+  if (resolved.origin !== baseOrigin) return undefined;
+
+  return resolved.href;
 }
 
 /** Returns a blob: URL for use in `<img src>`; caller must revokeObjectURL on cleanup. */
