@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Detect version bump
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            PREVIOUS=$(git show HEAD~1:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          else
+            PREVIOUS=""
+          fi
+
+          echo "previous=${PREVIOUS:-<none>}"
+          echo "current=$CURRENT"
+
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version bump detected: ${PREVIOUS:-<none>} → $CURRENT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged ($CURRENT); skipping release."
+          fi
+
+      - name: Setup Node.js
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.version.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Build zip
+        if: steps.version.outputs.changed == 'true'
+        run: npm run zip
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.current }}
+          name: v${{ steps.version.outputs.current }}
+          generate_release_notes: true
+          files: .output/opentranslator-extension-${{ steps.version.outputs.current }}-chrome.zip
+          fail_on_unmatched_files: true
