@@ -3,7 +3,7 @@
   "description": "Chrome extension for self-hosted OpenTranslator",
   "license": "GPL-3.0",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "wxt",
