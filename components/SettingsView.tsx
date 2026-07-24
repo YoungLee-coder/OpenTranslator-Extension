@@ -4,6 +4,7 @@ import BrandMark from "@/components/BrandMark";
 import SettingsAccountHub from "@/components/settings/SettingsAccountHub";
 import SettingsAlerts from "@/components/settings/SettingsAlerts";
 import SettingsInstanceSetup from "@/components/settings/SettingsInstanceSetup";
+import { isPingConnected, pingSetupHint } from "@/components/settings/utils";
 import { useExperts } from "@/hooks/useExperts";
 import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
@@ -39,6 +40,7 @@ export default function SettingsView({
   const [pingOk, setPingOk] = useState(false);
   const [pingBindings, setPingBindings] = useState<PingResponse["bindings"] | null>(null);
   const [pingService, setPingService] = useState("");
+  const [pingHint, setPingHint] = useState("");
 
   const applyState = useCallback(
     async (data: ExtensionState) => {
@@ -93,6 +95,7 @@ export default function SettingsView({
     setPingOk(false);
     setPingBindings(null);
     setPingService("");
+    setPingHint("");
   };
 
   const handleFormKeyDown = (e: React.KeyboardEvent) => {
@@ -126,9 +129,23 @@ export default function SettingsView({
         setError(formatApiError(res.error, res.status, res.kind));
         return;
       }
-      setPingOk(true);
-      setPingBindings(res.data?.bindings ?? null);
-      setPingService(res.data?.service ?? "OpenTranslator");
+      if (!res.data) {
+        resetPingState();
+        setError("无法读取实例状态");
+        return;
+      }
+      const data = res.data;
+      const connected = isPingConnected(data);
+      setPingOk(connected);
+      setPingBindings(data.bindings ?? null);
+      setPingService(data.service ?? "OpenTranslator");
+      if (!connected) {
+        setPingHint("");
+        setError("实例未就绪：请确认 Worker 已绑定 D1 与 KV");
+        return;
+      }
+      const hint = pingSetupHint(data);
+      setPingHint(hint ?? "");
       await setDraftBaseUrl(baseUrl.trim());
     } finally {
       setPingBusy(false);
@@ -293,6 +310,7 @@ export default function SettingsView({
             pingOk={pingOk}
             pingBindings={pingBindings}
             pingService={pingService}
+            pingHint={pingHint}
             error={error}
             success={success}
             onBaseUrlChange={handleBaseUrlChange}

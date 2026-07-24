@@ -28,11 +28,16 @@ export interface AuthMeResponse {
 export interface PingResponse {
   ok: boolean;
   service: string;
-  env: string;
   bindings: {
     db: boolean;
     kv: boolean;
   };
+  /** bindings 齐全且 _migrations 已存在 */
+  dbReady: boolean;
+  /** dbReady 且仍有未执行迁移 */
+  needsMigration: boolean;
+  /** dbReady 且至少有一名管理员 */
+  adminReady: boolean;
 }
 
 export interface TranslateModelOption {
@@ -40,6 +45,8 @@ export interface TranslateModelOption {
   model: string;
   modelLabel: string;
   providerName: string;
+  /** Adapter type (e.g. openai / deepl); used to hide unsupported capabilities. */
+  providerType: string;
 }
 
 export interface TranslateModelsResponse {
@@ -76,6 +83,11 @@ export interface TranslateRequest {
 export type TranslateStreamEvent =
   | { type: "delta"; text: string }
   | {
+      type: "progress";
+      chunkIndex: number;
+      chunkTotal: number;
+    }
+  | {
       type: "done";
       translatedText: string;
       provider: string;
@@ -83,6 +95,9 @@ export type TranslateStreamEvent =
       detectedSourceLang?: string;
     }
   | { type: "error"; error: string };
+
+/** Max source characters accepted by POST /api/translate. */
+export const MAX_TRANSLATE_CHARS = 80_000;
 
 export interface ExtensionAuth {
   baseUrl: string;

@@ -15,6 +15,7 @@ import { LANGUAGES, languageLabel } from "@/lib/languages";
 import { sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
+import { MAX_TRANSLATE_CHARS } from "@/types";
 
 const DEBOUNCE_MS = 500;
 
@@ -33,6 +34,10 @@ export default function App() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [detectedSourceLang, setDetectedSourceLang] = useState<string | null>(null);
+  const [chunkProgress, setChunkProgress] = useState<{
+    chunkIndex: number;
+    chunkTotal: number;
+  } | null>(null);
 
   const portRef = useRef<Browser.runtime.Port | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,6 +95,16 @@ export default function App() {
         setTranslatedText("");
         setError("");
         setDetectedSourceLang(null);
+        setChunkProgress(null);
+        return;
+      }
+
+      if (trimmed.length > MAX_TRANSLATE_CHARS) {
+        setTranslatedText("");
+        setDetectedSourceLang(null);
+        setChunkProgress(null);
+        setTranslating(false);
+        setError(`原文过长，请缩短后再试（上限 ${MAX_TRANSLATE_CHARS.toLocaleString("zh-CN")} 字符）`);
         return;
       }
 
@@ -97,6 +112,7 @@ export default function App() {
       setError("");
       setTranslatedText("");
       setDetectedSourceLang(null);
+      setChunkProgress(null);
 
       const port = browser.runtime.connect({ name: "translate" });
       portRef.current = port;
@@ -106,18 +122,30 @@ export default function App() {
         if (msg.type === "delta") {
           accumulated += msg.text;
           setTranslatedText(accumulated);
+        } else if (msg.type === "progress") {
+          setChunkProgress({
+            chunkIndex: msg.chunkIndex,
+            chunkTotal: msg.chunkTotal,
+          });
         } else if (msg.type === "done") {
           setTranslatedText(msg.translatedText || accumulated);
           if (msg.detectedSourceLang) {
             setDetectedSourceLang(msg.detectedSourceLang);
           }
+          setChunkProgress(null);
           setTranslating(false);
           port.disconnect();
           portRef.current = null;
         } else if (msg.type === "error") {
           setError(
-            formatApiError(msg.error, msg.status, msg.status === 429 ? "api" : undefined),
+            formatApiError(
+              msg.error,
+              msg.status,
+              msg.status === 429 ? "api" : undefined,
+              msg.retryAfterSeconds,
+            ),
           );
+          setChunkProgress(null);
           setTranslating(false);
           port.disconnect();
           portRef.current = null;
@@ -130,6 +158,7 @@ export default function App() {
             });
           }
         } else if (msg.type === "aborted") {
+          setChunkProgress(null);
           setTranslating(false);
           portRef.current = null;
         }
@@ -235,6 +264,7 @@ export default function App() {
     setTranslatedText("");
     setError("");
     setDetectedSourceLang(null);
+    setChunkProgress(null);
   };
 
   const openSettings = () => {
@@ -373,8 +403,38 @@ export default function App() {
           </div>
 
           {translating && (
-            <div className="progress-bar" role="progressbar" aria-label="翻译中">
-              <div className="progress-bar-fill" />
+            <div
+              className="progress-bar"
+              role="progressbar"
+              aria-label={
+                chunkProgress
+                  ? `翻译中，第 ${chunkProgress.chunkIndex + 1} / ${chunkProgress.chunkTotal} 段`
+                  : "翻译中"
+              }
+              aria-valuemin={chunkProgress ? 0 : undefined}
+              aria-valuemax={chunkProgress ? chunkProgress.chunkTotal : undefined}
+              aria-valuenow={
+                chunkProgress ? chunkProgress.chunkIndex + 1 : undefined
+              }
+            >
+              <div
+                className={[
+                  "progress-bar-fill",
+                  chunkProgress ? "is-determinate" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                style={
+                  chunkProgress
+                    ? {
+                        width: `${Math.max(
+                          ((chunkProgress.chunkIndex + 1) / chunkProgress.chunkTotal) * 100,
+                          8,
+                        )}%`,
+                      }
+                    : undefined
+                }
+              />
             </div>
           )}
 
@@ -385,7 +445,11 @@ export default function App() {
               ) : translatedText ? (
                 <span className="animate-fade-in">{translatedText}</span>
               ) : translating ? (
-                <span className="target-placeholder">正在翻译…</span>
+                <span className="target-placeholder">
+                  {chunkProgress
+                    ? `正在翻译第 ${chunkProgress.chunkIndex + 1} / ${chunkProgress.chunkTotal} 段…`
+                    : "正在翻译…"}
+                </span>
               ) : (
                 <span className="target-placeholder">译文将显示在这里</span>
               )}

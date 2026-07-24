@@ -13,6 +13,7 @@ type SettingsInstanceSetupProps = {
   pingOk: boolean;
   pingBindings: PingResponse["bindings"] | null;
   pingService: string;
+  pingHint: string;
   error: string;
   success: string;
   onBaseUrlChange: (value: string) => void;
@@ -33,6 +34,7 @@ export default function SettingsInstanceSetup({
   pingOk,
   pingBindings,
   pingService,
+  pingHint,
   error,
   success,
   onBaseUrlChange,
@@ -104,6 +106,11 @@ export default function SettingsInstanceSetup({
                 )}
               </span>
             </div>
+            {pingOk && pingHint ? (
+              <p className="muted settings-hint settings-ping-hint" role="status">
+                {pingHint}
+              </p>
+            ) : null}
           </div>
         </div>
 

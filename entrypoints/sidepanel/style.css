@@ -147,3 +147,9 @@ body {
   background: var(--primary);
   animation: progress-indeterminate 1.2s ease-in-out infinite;
 }
+
+.progress-bar-fill.is-determinate {
+  width: 0;
+  animation: none;
+  transition: width 0.25s ease;
+}

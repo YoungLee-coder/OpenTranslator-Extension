@@ -39,8 +39,15 @@ export type TranslatePortIn =
 
 export type TranslatePortOut =
   | { type: "delta"; text: string }
+  | { type: "progress"; chunkIndex: number; chunkTotal: number }
   | { type: "done"; translatedText: string; detectedSourceLang?: string }
-  | { type: "error"; error: string; status?: number; unauthenticated?: boolean }
+  | {
+      type: "error";
+      error: string;
+      status?: number;
+      unauthenticated?: boolean;
+      retryAfterSeconds?: number;
+    }
   | { type: "aborted" };
 
 export function sendBg<T = unknown>(request: BgRequest): Promise<BgResponse & { data?: T }> {

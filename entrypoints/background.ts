@@ -265,6 +265,12 @@ export default defineBackground(() => {
           if (event.type === "delta") {
             translated += event.text;
             port.postMessage({ type: "delta", text: event.text });
+          } else if (event.type === "progress") {
+            port.postMessage({
+              type: "progress",
+              chunkIndex: event.chunkIndex,
+              chunkTotal: event.chunkTotal,
+            });
           } else if (event.type === "done") {
             port.postMessage({
               type: "done",
@@ -296,6 +302,7 @@ export default defineBackground(() => {
             type: "error",
             error: err.message,
             status: err.status,
+            retryAfterSeconds: err.retryAfterSeconds,
           });
           return;
         }

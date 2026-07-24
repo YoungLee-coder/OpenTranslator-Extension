@@ -421,6 +421,12 @@
   font-size: 12px;
 }
 
+.settings-ping-hint {
+  margin-top: 8px;
+  text-align: left;
+  color: var(--muted-foreground);
+}
+
 /* Footer */
 
 .settings-brand-footer {

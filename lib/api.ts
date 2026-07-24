@@ -13,23 +13,51 @@ import { parseSseStream } from "@/lib/sse";
 export class ApiError extends Error {
   status: number;
   kind: "cors" | "network" | "api";
+  retryAfterSeconds?: number;
 
-  constructor(status: number, message: string, kind: ApiError["kind"] = "api") {
+  constructor(
+    status: number,
+    message: string,
+    kind: ApiError["kind"] = "api",
+    retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.kind = kind;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+type ErrorBody = { error?: string; retryAfterSeconds?: number };
+
+async function readErrorBody(res: Response): Promise<ErrorBody> {
+  try {
+    return (await res.json()) as ErrorBody;
+  } catch {
+    return {};
   }
 }
 
 async function readErrorMessage(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { error?: string };
-    if (data?.error) return data.error;
-  } catch {
-    // ignore
+  const data = await readErrorBody(res);
+  if (res.status === 429) {
+    return formatRateLimitMessage(data.retryAfterSeconds);
+  }
+  if (data.error) {
+    if (res.status === 400 && /exceeds maximum length|maximum length/i.test(data.error)) {
+      return "原文过长，请缩短后再试（上限 80 000 字符）";
+    }
+    return data.error;
   }
   return `请求失败 (${res.status})`;
+}
+
+function formatRateLimitMessage(retryAfterSeconds?: number): string {
+  if (retryAfterSeconds != null && retryAfterSeconds > 0) {
+    return `请求过于频繁，请 ${retryAfterSeconds} 秒后再试`;
+  }
+  return "请求过于频繁，请稍后再试";
 }
 
 function wrapFetchError(err: unknown): ApiError {
@@ -170,11 +198,16 @@ export async function* streamTranslate(
   }
 
   if (!res.ok || !res.body) {
-    const msg =
-      res.status === 429
-        ? "请求过于频繁，请稍后再试"
-        : await readErrorMessage(res);
-    throw new ApiError(res.status, msg);
+    if (res.status === 429) {
+      const body = await readErrorBody(res);
+      throw new ApiError(
+        429,
+        formatRateLimitMessage(body.retryAfterSeconds),
+        "api",
+        body.retryAfterSeconds,
+      );
+    }
+    throw new ApiError(res.status, await readErrorMessage(res));
   }
 
   yield* parseSseStream(res.body, signal);
