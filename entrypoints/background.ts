@@ -150,14 +150,6 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
   }
 }
 
-async function openSidePanel() {
-  if (!browser.sidePanel?.open) return;
-  const window = await browser.windows.getCurrent();
-  if (window.id != null) {
-    await browser.sidePanel.open({ windowId: window.id });
-  }
-}
-
 export default defineBackground(() => {
   if (browser.sidePanel) {
     void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -176,12 +168,6 @@ export default defineBackground(() => {
 
   browser.runtime.onStartup.addListener(() => {
     void verifyBound();
-  });
-
-  browser.runtime.onInstalled.addListener((details) => {
-    if (details.reason === "install") {
-      void openSidePanel();
-    }
   });
 
   browser.runtime.onMessage.addListener((request: BgRequest, sender) => {
