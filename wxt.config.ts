@@ -6,6 +6,12 @@ const DEV_EXTENSION_KEY =
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  // Chrome rejects extension modulepreload (cross-world mismatch); shared chunks still load via import.
+  vite: () => ({
+    build: {
+      modulePreload: false,
+    },
+  }),
   manifest: {
     name: "OpenTranslator",
     description: "使用自托管 OpenTranslator 实例进行翻译",
