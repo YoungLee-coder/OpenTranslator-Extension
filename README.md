@@ -6,7 +6,7 @@
 
 - **Options**：实例地址、测试连接、登录绑定、退出/更换实例
 - **Side Panel**：语言选择、输入防抖自动翻译、SSE 流式译文、复制、语言互换
-- **Gmail**：阅读邮件时注入翻译按钮；整封走 `/api/translate/email`（整封替换或双语对照 HTML），可在原文与译文间切换
+- **Gmail**：阅读邮件时注入翻译按钮；整封走 `/api/translate/email`（整封替换或双语对照 HTML），可在原文与译文间切换；自动跳过 DeepL（改用 LLM）
 - **Background**：所有 API 在 Service Worker 中执行；凭证仅存 `chrome.storage.local`
 - **会话**：打开时校验 token；每 30 分钟自动检查，过期则清除凭证
 

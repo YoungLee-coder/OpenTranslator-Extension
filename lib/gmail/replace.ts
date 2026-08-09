@@ -51,7 +51,7 @@ export type ReplaceTranslateResult =
   | { ok: false; error: string; unauthenticated?: boolean; cancelled?: boolean };
 
 /**
- * Snapshot body → POST /api/translate/email → replace (quotes preserved server-side).
+ * Snapshot body → trim quoted/hidden HTML → POST /api/translate/email → replace.
  * `display: "bilingual"` asks the server for interleaved source + translation HTML.
  * `resolveBody` is called after the network round-trip so we apply to the live node.
  */

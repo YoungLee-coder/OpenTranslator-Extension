@@ -1,11 +1,11 @@
 import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate, streamTranslateEmail } from "@/lib/api";
 import { resolveExpertId } from "@/lib/experts";
-import { decodeModelKey } from "@/lib/models";
+import { decodeModelKey, resolveEmailTranslateModel } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslatePortOut } from "@/lib/messaging";
 import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getPrefs, setAuth, setPrefs } from "@/lib/storage";
-import type { AiExpertsPublicResponse, TranslateModelsResponse } from "@/types";
+import type { AiExpertsPublicResponse, ExtensionAuth, TranslateModelsResponse } from "@/types";
 import { normalizeBaseUrl } from "@/lib/url";
 
 const SESSION_ALARM = "session-check";
@@ -30,6 +30,14 @@ function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null 
   if (!cache || cache.userId !== userId) return null;
   if (Date.now() - cache.fetchedAt > CATALOG_TTL_MS) return null;
   return cache.data;
+}
+
+async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsResponse> {
+  const cached = cacheFresh(modelsCache, auth.user.id);
+  if (cached) return cached;
+  const data = await fetchModels(auth.baseUrl, auth.token);
+  modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+  return data;
 }
 
 async function verifyBound(): Promise<ExtensionState> {
@@ -116,10 +124,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
-        const cached = cacheFresh(modelsCache, auth.user.id);
-        if (cached) return { ok: true, data: cached };
-        const data = await fetchModels(auth.baseUrl, auth.token);
-        modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+        const data = await loadModelsCatalog(auth);
         return { ok: true, data };
       }
       case "getExperts": {
@@ -164,14 +169,24 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         }
 
         const prefs = await getPrefs();
-        let providerId: string | undefined;
-        let model: string | undefined;
+        let preferred: { providerId: string; model: string } | undefined;
         if (prefs.modelKey) {
           try {
-            ({ providerId, model } = decodeModelKey(prefs.modelKey));
+            preferred = decodeModelKey(prefs.modelKey);
           } catch {
-            // ignore invalid stored key; server falls back to default provider
+            // ignore invalid stored key
           }
+        }
+
+        // DeepL cannot do email HTML — pick an LLM even if the user default is DeepL.
+        const catalog = await loadModelsCatalog(auth);
+        const resolved = resolveEmailTranslateModel(
+          catalog.models,
+          catalog.default,
+          preferred,
+        );
+        if (!resolved) {
+          return fail("Gmail 翻译不支持 DeepL，请先配置可用的 LLM 模型");
         }
 
         const abort = new AbortController();
@@ -187,8 +202,8 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
               html: request.html,
               sourceLang: request.sourceLang,
               targetLang: request.targetLang,
-              providerId,
-              model,
+              providerId: resolved.providerId,
+              model: resolved.model,
               preserveQuotes: request.preserveQuotes !== false,
               display: request.display === "bilingual" ? "bilingual" : "replace",
             },
