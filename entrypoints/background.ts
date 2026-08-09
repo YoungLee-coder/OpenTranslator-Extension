@@ -11,12 +11,16 @@ import { normalizeBaseUrl } from "@/lib/url";
 const SESSION_ALARM = "session-check";
 const SESSION_CHECK_MINUTES = 30;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
+/** Skip /api/auth/me on translate when recently verified (aligned with models cache). */
+const SESSION_TTL_MS = CATALOG_TTL_MS;
 const PORT_KEEPALIVE_MS = 20_000;
 
 type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
 
 let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
 let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
+/** Last successful /api/auth/me (or login) for the bound user. */
+let sessionVerified: { userId: string; at: number } | null = null;
 
 /** In-flight one-shot email translates (sendMessage keeps SW alive until Promise settles). */
 const emailAborts = new Map<string, AbortController>();
@@ -24,6 +28,24 @@ const emailAborts = new Map<string, AbortController>();
 function clearCatalogCaches() {
   modelsCache = null;
   expertsCache = null;
+}
+
+function clearSessionCache() {
+  sessionVerified = null;
+}
+
+function clearAuthCaches() {
+  clearCatalogCaches();
+  clearSessionCache();
+}
+
+function markSessionVerified(userId: string) {
+  sessionVerified = { userId, at: Date.now() };
+}
+
+function isSessionFresh(userId: string): boolean {
+  if (!sessionVerified || sessionVerified.userId !== userId) return false;
+  return Date.now() - sessionVerified.at <= SESSION_TTL_MS;
 }
 
 function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null {
@@ -40,6 +62,35 @@ async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsRe
   return data;
 }
 
+/** Warm models catalog without blocking the caller. */
+function prefetchModelsCatalog(auth: ExtensionAuth): void {
+  void loadModelsCatalog(auth).catch(() => {
+    // Best-effort warm; translate path will retry.
+  });
+}
+
+/**
+ * Use a short-lived session cache so translate clicks skip /api/auth/me.
+ * Still re-validates when TTL expires; 401 from translate clears auth as before.
+ */
+async function ensureSession(
+  auth: ExtensionAuth,
+): Promise<{ ok: true } | { ok: false; status: number }> {
+  if (isSessionFresh(auth.user.id)) return { ok: true };
+
+  const session = await me(auth.baseUrl, auth.token);
+  if (!session.authenticated) {
+    await clearAuth();
+    clearAuthCaches();
+    return { ok: false, status: 401 };
+  }
+  if (session.user) {
+    await setAuth({ ...auth, user: session.user });
+  }
+  markSessionVerified(auth.user.id);
+  return { ok: true };
+}
+
 async function verifyBound(): Promise<ExtensionState> {
   const auth = await getAuth();
   if (!auth) return readExtensionState();
@@ -47,17 +98,18 @@ async function verifyBound(): Promise<ExtensionState> {
     const session = await me(auth.baseUrl, auth.token);
     if (!session.authenticated) {
       await clearAuth();
-      clearCatalogCaches();
+      clearAuthCaches();
       return readExtensionState();
     }
     if (session.user) {
       await setAuth({ ...auth, user: session.user });
     }
+    markSessionVerified(auth.user.id);
     return readExtensionState();
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       await clearAuth();
-      clearCatalogCaches();
+      clearAuthCaches();
     }
     return readExtensionState();
   }
@@ -81,12 +133,15 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           email: request.email,
           password: request.password,
         });
-        await setAuth({
+        const auth: ExtensionAuth = {
           baseUrl,
           token: data.token,
           user: data.user,
-        });
+        };
+        await setAuth(auth);
         clearCatalogCaches();
+        markSessionVerified(data.user.id);
+        prefetchModelsCatalog(auth);
         return { ok: true, data };
       }
       case "me": {
@@ -103,14 +158,14 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           }
         }
         await clearAuth();
-        clearCatalogCaches();
+        clearAuthCaches();
         if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
       case "clearAuth": {
         const auth = await getAuth();
         await clearAuth();
-        clearCatalogCaches();
+        clearAuthCaches();
         if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
@@ -118,6 +173,11 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         // Local storage only — session checks run via "me", alarms, and translate.
         const state = await readExtensionState();
         return { ok: true, data: state };
+      }
+      case "warmup": {
+        const auth = await getAuth();
+        if (auth) prefetchModelsCatalog(auth);
+        return { ok: true };
       }
       case "getModels": {
         const auth = await getAuth();
@@ -144,8 +204,8 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           targetLang: request.targetLang,
           modelKey: request.modelKey,
           expertId: request.expertId,
-          gmailEnabled: request.gmailEnabled,
-          gmailTranslateMode: request.gmailTranslateMode,
+          emailEnabled: request.emailEnabled,
+          emailTranslateMode: request.emailTranslateMode,
         });
         const state = await readExtensionState();
         return { ok: true, data: state };
@@ -161,11 +221,9 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
 
-        const session = await me(auth.baseUrl, auth.token);
-        if (!session.authenticated) {
-          await clearAuth();
-          clearCatalogCaches();
-          return fail("登录已过期，请重新登录", 401);
+        const session = await ensureSession(auth);
+        if (!session.ok) {
+          return fail("登录已过期，请重新登录", session.status);
         }
 
         const prefs = await getPrefs();
@@ -186,7 +244,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           preferred,
         );
         if (!resolved) {
-          return fail("Gmail 翻译不支持 DeepL，请先配置可用的 LLM 模型");
+          return fail("Email 翻译不支持 DeepL，请先配置可用的 LLM 模型");
         }
 
         const abort = new AbortController();
@@ -237,7 +295,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           if (err instanceof ApiError) {
             if (err.status === 401 || err.status === 403) {
               await clearAuth();
-              clearCatalogCaches();
+              clearAuthCaches();
               return fail("登录已过期，请重新登录", err.status);
             }
             return fail(err.message, err.status, err.kind);
@@ -344,15 +402,13 @@ export default defineBackground(() => {
       }
 
       try {
-        const session = await me(auth.baseUrl, auth.token);
-        if (!session.authenticated) {
-          await clearAuth();
-          clearCatalogCaches();
+        const session = await ensureSession(auth);
+        if (!session.ok) {
           stopKeepAlive();
           post({
             type: "error",
             error: "登录已过期，请重新登录",
-            status: 401,
+            status: session.status,
             unauthenticated: true,
           });
           return;
@@ -424,7 +480,7 @@ export default defineBackground(() => {
         if (err instanceof ApiError) {
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
-            clearCatalogCaches();
+            clearAuthCaches();
             post({
               type: "error",
               error: "登录已过期，请重新登录",

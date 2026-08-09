@@ -18,7 +18,7 @@ export function modelOptionLabel(option: TranslateModelOption): string {
   return `${option.providerName} · ${option.modelLabel}`;
 }
 
-/** DeepL cannot translate email HTML; Gmail must use an LLM provider. */
+/** DeepL cannot translate email HTML; Email 翻译 must use an LLM provider. */
 export function isEmailCapableModel(option: TranslateModelOption): boolean {
   return option.providerType !== "deepl";
 }

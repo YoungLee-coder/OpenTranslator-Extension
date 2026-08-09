@@ -123,16 +123,16 @@ export interface ExtensionAuth {
   user: AuthUser;
 }
 
-/** Gmail in-message translation style. */
-export type GmailTranslateMode = "replace" | "bilingual";
+/** In-message email translation style (Gmail). */
+export type EmailTranslateMode = "replace" | "bilingual";
 
 export interface ExtensionPrefs {
   sourceLang: string;
   targetLang: string;
   modelKey?: string | null;
   expertId?: string | null;
-  /** Gmail 翻译按钮；默认开启 */
-  gmailEnabled?: boolean;
-  /** Gmail 翻译方式；默认整封替换 */
-  gmailTranslateMode?: GmailTranslateMode;
+  /** Email 翻译按钮（Gmail，Beta）；默认开启 */
+  emailEnabled?: boolean;
+  /** Email 翻译方式；默认整封替换 */
+  emailTranslateMode?: EmailTranslateMode;
 }

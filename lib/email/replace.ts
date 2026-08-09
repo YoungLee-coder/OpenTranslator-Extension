@@ -1,10 +1,11 @@
-import { translateEmailHtml } from "@/lib/gmail/client";
+import { translateEmailHtml } from "@/lib/email/client";
 import {
   applyReplacedHtml,
   hasReplacedTranslation,
   prepareEmailHtml,
   restoreOriginalHtml,
-} from "@/lib/gmail/html";
+} from "@/lib/email/html";
+import { OT_REPLACED_ATTR } from "@/lib/email/dom";
 import type { TranslateEmailDisplay } from "@/types";
 
 export type ReplaceView = "original" | "translated";
@@ -16,7 +17,7 @@ export type ReplaceCache = {
   display: TranslateEmailDisplay;
 };
 
-/** Keyed by stable message key — survives Gmail replacing the body element. */
+/** Keyed by stable message key — survives provider replacing the body element. */
 const caches = new Map<string, ReplaceCache>();
 
 export function getReplaceCache(messageKey: string): ReplaceCache | undefined {
@@ -26,6 +27,7 @@ export function getReplaceCache(messageKey: string): ReplaceCache | undefined {
 export function clearReplaceCache(messageKey: string, body?: HTMLElement): void {
   caches.delete(messageKey);
   if (body && hasReplacedTranslation(body)) {
+    body.removeAttribute(OT_REPLACED_ATTR);
     body.removeAttribute("data-ot-gmail-replaced");
   }
 }

@@ -13,7 +13,7 @@ import type { ExtensionState } from "@/lib/messaging";
 import { ensureHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { getDraftBaseUrl, setDraftBaseUrl } from "@/lib/storage";
-import type { PingResponse, GmailTranslateMode } from "@/types";
+import type { PingResponse, EmailTranslateMode } from "@/types";
 import "./settings.css";
 
 type SettingsViewProps = {
@@ -235,9 +235,9 @@ export default function SettingsView({
     }
   };
 
-  const handleGmailEnabledChange = async (gmailEnabled: boolean) => {
+  const handleEmailEnabledChange = async (emailEnabled: boolean) => {
     clearMessages();
-    const res = await sendBg<ExtensionState>({ type: "setPrefs", gmailEnabled });
+    const res = await sendBg<ExtensionState>({ type: "setPrefs", emailEnabled });
     if (!res.ok) {
       setError(formatApiError(res.error, res.status, res.kind));
       return;
@@ -248,9 +248,9 @@ export default function SettingsView({
     }
   };
 
-  const handleGmailTranslateModeChange = async (gmailTranslateMode: GmailTranslateMode) => {
+  const handleEmailTranslateModeChange = async (emailTranslateMode: EmailTranslateMode) => {
     clearMessages();
-    const res = await sendBg<ExtensionState>({ type: "setPrefs", gmailTranslateMode });
+    const res = await sendBg<ExtensionState>({ type: "setPrefs", emailTranslateMode });
     if (!res.ok) {
       setError(formatApiError(res.error, res.status, res.kind));
       return;
@@ -328,8 +328,8 @@ export default function SettingsView({
               busy={busy}
               onModelChange={(modelKey) => void handleModelChange(modelKey)}
               onExpertChange={(expertId) => void handleExpertChange(expertId)}
-              onGmailEnabledChange={(enabled) => void handleGmailEnabledChange(enabled)}
-              onGmailTranslateModeChange={(mode) => void handleGmailTranslateModeChange(mode)}
+              onEmailEnabledChange={(enabled) => void handleEmailEnabledChange(enabled)}
+              onEmailTranslateModeChange={(mode) => void handleEmailTranslateModeChange(mode)}
               onChangeInstance={() => void handleChangeInstance()}
               onLogout={() => void handleLogout()}
             />

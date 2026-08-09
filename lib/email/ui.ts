@@ -1,5 +1,5 @@
-import type { GmailTranslateMode } from "@/types";
-import { OT_BTN_ATTR, OT_HOST_ATTR } from "./dom";
+import type { EmailTranslateMode } from "@/types";
+import { OT_BTN_ATTR, OT_HOST_ATTR } from "@/lib/email/dom";
 
 export type ButtonPhase = "idle" | "loading" | "done" | "error" | "stop" | "show-translation";
 
@@ -10,27 +10,13 @@ const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" wi
   <polygon fill="#21201C" points="25.75 23 28.5 25.75 25.75 28.5 23 25.75"/>
 </svg>`;
 
-const GMAIL_LAYOUT_STYLE_ID = "ot-gmail-layout-fix";
-
-/**
- * Allow Gmail message rows to grow when bilingual translation blocks are inserted.
- */
-export function ensureGmailLayoutCss(): void {
-  if (document.getElementById(GMAIL_LAYOUT_STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = GMAIL_LAYOUT_STYLE_ID;
-  style.textContent =
-    "[role='listitem'] > div { height:auto!important; white-space:unset!important; }";
-  document.documentElement.appendChild(style);
-}
-
-export function createTranslateButton(mode: GmailTranslateMode = "replace"): HTMLButtonElement {
+export function createTranslateButton(mode: EmailTranslateMode = "replace"): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "ot-gmail-btn";
+  btn.className = "ot-email-btn";
   btn.setAttribute(OT_BTN_ATTR, "1");
   btn.dataset.otMode = mode;
-  btn.innerHTML = `${LOGO_SVG}<span class="ot-gmail-btn-label">翻译</span>`;
+  btn.innerHTML = `${LOGO_SVG}<span class="ot-email-btn-label">翻译</span>`;
   setButtonPhase(btn, "idle", undefined, mode);
   return btn;
 }
@@ -39,18 +25,18 @@ export function setButtonPhase(
   btn: HTMLButtonElement,
   phase: ButtonPhase,
   detail?: string,
-  mode: GmailTranslateMode = (btn.dataset.otMode as GmailTranslateMode) || "replace",
+  mode: EmailTranslateMode = (btn.dataset.otMode as EmailTranslateMode) || "replace",
 ): void {
   btn.dataset.otPhase = phase;
   btn.dataset.otMode = mode;
   btn.classList.toggle(
-    "ot-gmail-btn--active",
+    "ot-email-btn--active",
     phase === "done" || phase === "loading" || phase === "stop" || phase === "show-translation",
   );
-  btn.classList.toggle("ot-gmail-btn--error", phase === "error");
+  btn.classList.toggle("ot-email-btn--error", phase === "error");
   btn.disabled = phase === "loading";
 
-  const label = btn.querySelector(".ot-gmail-btn-label");
+  const label = btn.querySelector(".ot-email-btn-label");
   if (!(label instanceof HTMLElement)) return;
 
   const bilingual = mode === "bilingual";
@@ -95,9 +81,20 @@ export function mountButton(
   button: HTMLButtonElement,
   toolbar: HTMLElement | null,
   body: HTMLElement,
+  insert: "start" | "end" = "end",
+  mountTarget?: { parent: HTMLElement; before: ChildNode | null } | null,
 ): HTMLElement {
+  if (mountTarget?.parent) {
+    mountTarget.parent.insertBefore(button, mountTarget.before);
+    return mountTarget.parent;
+  }
+
   if (toolbar) {
-    toolbar.appendChild(button);
+    if (insert === "start") {
+      toolbar.insertBefore(button, toolbar.firstChild);
+    } else {
+      toolbar.appendChild(button);
+    }
     return toolbar;
   }
 
@@ -108,7 +105,7 @@ export function mountButton(
   }
 
   const host = document.createElement("div");
-  host.className = "ot-gmail-host";
+  host.className = "ot-email-host";
   host.setAttribute(OT_HOST_ATTR, "1");
   host.appendChild(button);
   body.parentElement?.insertBefore(host, body);
@@ -116,9 +113,9 @@ export function mountButton(
 }
 
 export function showToast(message: string, ms = 3200): void {
-  document.querySelectorAll(".ot-gmail-toast").forEach((el) => el.remove());
+  document.querySelectorAll(".ot-email-toast").forEach((el) => el.remove());
   const toast = document.createElement("div");
-  toast.className = "ot-gmail-toast";
+  toast.className = "ot-email-toast";
   toast.setAttribute("role", "status");
   toast.textContent = message;
   document.documentElement.appendChild(toast);

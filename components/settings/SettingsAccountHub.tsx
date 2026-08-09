@@ -13,7 +13,7 @@ import { expertLabel, GENERAL_EXPERT_ID } from "@/lib/experts";
 import { languageLabel } from "@/lib/languages";
 import { encodeModelKey, modelOptionLabel } from "@/lib/models";
 import type { ExtensionState } from "@/lib/messaging";
-import type { AiExpertMeta, GmailTranslateMode, TranslateModelOption } from "@/types";
+import type { AiExpertMeta, EmailTranslateMode, TranslateModelOption } from "@/types";
 import { formatInstanceHost } from "./utils";
 
 type SettingsAccountHubProps = {
@@ -27,8 +27,8 @@ type SettingsAccountHubProps = {
   busy: boolean;
   onModelChange: (modelKey: string) => void;
   onExpertChange: (expertId: string) => void;
-  onGmailEnabledChange: (enabled: boolean) => void;
-  onGmailTranslateModeChange: (mode: GmailTranslateMode) => void;
+  onEmailEnabledChange: (enabled: boolean) => void;
+  onEmailTranslateModeChange: (mode: EmailTranslateMode) => void;
   onChangeInstance: () => void;
   onLogout: () => void;
 };
@@ -44,8 +44,8 @@ export default function SettingsAccountHub({
   busy,
   onModelChange,
   onExpertChange,
-  onGmailEnabledChange,
-  onGmailTranslateModeChange,
+  onEmailEnabledChange,
+  onEmailTranslateModeChange,
   onChangeInstance,
   onLogout,
 }: SettingsAccountHubProps) {
@@ -157,39 +157,40 @@ export default function SettingsAccountHub({
         <div className="settings-row">
           <dt className="settings-row-label">
             <Mail size={14} strokeWidth={1.75} aria-hidden />
-            Gmail 翻译
+            Email 翻译 (Beta)
           </dt>
           <dd className="settings-row-value settings-row-toggle">
             <button
               type="button"
               role="switch"
               className="settings-switch"
-              aria-checked={state.gmailEnabled}
-              aria-label="Gmail 翻译"
+              aria-checked={state.emailEnabled}
+              aria-label="Email 翻译 (Beta)"
+              title="Gmail 阅读邮件时显示翻译按钮（Beta）"
               disabled={busy}
-              onClick={() => onGmailEnabledChange(!state.gmailEnabled)}
+              onClick={() => onEmailEnabledChange(!state.emailEnabled)}
             >
               <span className="settings-switch-thumb" aria-hidden />
             </button>
           </dd>
         </div>
-        {state.gmailEnabled && (
+        {state.emailEnabled && (
           <div className="settings-row">
             <dt className="settings-row-label">
               <Languages size={14} strokeWidth={1.75} aria-hidden />
-              Gmail 方式
+              Email 方式
             </dt>
             <dd className="settings-row-value settings-row-model">
               <select
                 className="settings-model-select"
-                value={state.gmailTranslateMode}
+                value={state.emailTranslateMode}
                 onChange={(e) =>
-                  onGmailTranslateModeChange(e.target.value as GmailTranslateMode)
+                  onEmailTranslateModeChange(e.target.value as EmailTranslateMode)
                 }
                 disabled={busy}
-                aria-label="Gmail 翻译方式"
+                aria-label="Email 翻译方式"
                 title={
-                  state.gmailTranslateMode === "bilingual"
+                  state.emailTranslateMode === "bilingual"
                     ? "整封生成双语对照 HTML，可切换回原文"
                     : "整封一次翻译并替换正文，可还原原文"
                 }

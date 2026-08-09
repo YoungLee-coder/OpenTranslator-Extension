@@ -1,4 +1,6 @@
-/** Light sanitize / apply helpers for Gmail whole-email replace translation. */
+/** Light sanitize / apply helpers for whole-email HTML translation. */
+
+import { OT_REPLACED_ATTR } from "@/lib/email/dom";
 
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "META", "LINK", "IFRAME", "OBJECT", "EMBED"]);
 
@@ -8,9 +10,14 @@ const QUOTE_SELECTORS = [
   "div.gmail_quote",
   "div.gmail_extra",
   'blockquote[type="cite"]',
+  "div#divRplyFwdMsg",
+  "div#appendonsend",
+  "div#divRplyFwdMsg ~ *",
+  "hr + div.OutlookMessageHeader",
+  "div.OutlookMessageHeader",
 ].join(",");
 
-const EXTENSION_CHROME_SELECTORS = "[data-ot-gmail-replaced], .ot-gmail-translation";
+const EXTENSION_CHROME_SELECTORS = `[${OT_REPLACED_ATTR}], .ot-email-translation, [data-ot-gmail-replaced], .ot-gmail-translation`;
 
 /**
  * Clone message HTML for the email API: drop dangerous tags, quoted threads, and
@@ -32,7 +39,7 @@ export function prepareEmailHtml(body: HTMLElement): { html: string; plainLength
   return { html, plainLength };
 }
 
-/** Remove Gmail / Apple Mail quote blocks nested in thread replies. */
+/** Remove Gmail / Outlook / Apple Mail quote blocks nested in thread replies. */
 function removeQuotedThreadContent(root: HTMLElement): void {
   root.querySelectorAll(QUOTE_SELECTORS).forEach((el) => el.remove());
 }
@@ -90,14 +97,19 @@ function parseImgDimension(property: number, attribute: string | null): number {
 
 export function applyReplacedHtml(body: HTMLElement, translatedHtml: string): void {
   body.innerHTML = translatedHtml;
-  body.setAttribute("data-ot-gmail-replaced", "1");
+  body.setAttribute(OT_REPLACED_ATTR, "1");
+  body.removeAttribute("data-ot-gmail-replaced");
 }
 
 export function restoreOriginalHtml(body: HTMLElement, originalHtml: string): void {
   body.innerHTML = originalHtml;
+  body.removeAttribute(OT_REPLACED_ATTR);
   body.removeAttribute("data-ot-gmail-replaced");
 }
 
 export function hasReplacedTranslation(body: HTMLElement): boolean {
-  return body.getAttribute("data-ot-gmail-replaced") === "1";
+  return (
+    body.getAttribute(OT_REPLACED_ATTR) === "1" ||
+    body.getAttribute("data-ot-gmail-replaced") === "1"
+  );
 }

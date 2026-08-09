@@ -6,7 +6,7 @@
 
 - **Options**：实例地址、测试连接、登录绑定、退出/更换实例
 - **Side Panel**：语言选择、输入防抖自动翻译、SSE 流式译文、复制、语言互换
-- **Gmail**：阅读邮件时注入翻译按钮；整封走 `/api/translate/email`（整封替换或双语对照 HTML），可在原文与译文间切换；自动跳过 DeepL（改用 LLM）
+- **Email 翻译 (Beta)**：Gmail 阅读邮件时注入翻译按钮；整封走 `/api/translate/email`（整封替换或双语对照 HTML），可在原文与译文间切换；自动跳过 DeepL（改用 LLM）
 - **Background**：所有 API 在 Service Worker 中执行；凭证仅存 `chrome.storage.local`
 - **会话**：打开时校验 token；每 30 分钟自动检查，过期则清除凭证
 
@@ -72,9 +72,9 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 - [ ] Options 或 Side Panel 登录成功
 - [ ] Side Panel 输入英文，流式输出中文
 - [ ] Gmail 打开英文邮件 → 出现翻译按钮 → 整封替换成功 → 可切回原文 / 再显示译文
-- [ ] Gmail 方式改为「双语对照」→ 正文出现原文+译文交错（译文带 `ot-gmail-translation`）→ 可切回原文
+- [ ] Email 方式改为「双语对照」→ 正文出现原文+译文交错（译文带 `ot-email-translation` / `ot-gmail-translation`）→ 可切回原文
 - [ ] 富文本邮件：链接/图片/表格仍可用；引用与签名默认保留不译
-- [ ] 未登录时点击 Gmail 按钮有明确提示
+- [ ] 未登录时点击 Email 按钮有明确提示
 - [ ] token 过期后自动清除并提示重新登录
 
 ## 架构
@@ -82,11 +82,11 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 ```
 entrypoints/
   background.ts       # API 出口、消息路由、SSE 流式 Port
-  gmail.content.ts    # Gmail 内容脚本（按钮 + 整封 HTML 替换）
+  gmail.content.ts    # Gmail 内容脚本（Email 翻译 Beta）
   options/            # 独立 Options 页（设置）
   sidepanel/          # 主翻译界面 + 内嵌设置
 assets/
-  gmail-content.css   # Gmail 注入样式
+  email-content.css   # Email 注入样式
 components/
   SettingsView.tsx    # 设置编排层
   settings/           # 账户 hub、实例绑定等子组件
@@ -95,7 +95,7 @@ hooks/
   useExperts.ts       # 专家列表加载与校验
 lib/
   api.ts              # ping / login / me / translate / translateEmail
-  gmail/              # Gmail DOM / UI / 整封替换客户端
+  email/              # Email DOM / UI / 整封替换客户端（Gmail）
   storage.ts          # chrome.storage.local
   sse.ts              # SSE 解析
   messaging.ts        # sidepanel/options/content ↔ background 协议

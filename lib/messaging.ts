@@ -2,7 +2,7 @@
 import type {
   AiExpertsPublicResponse,
   AuthUser,
-  GmailTranslateMode,
+  EmailTranslateMode,
   TranslateModelsResponse,
 } from "@/types";
 
@@ -15,14 +15,16 @@ export type BgRequest =
   | { type: "clearAuth" }
   | { type: "getModels" }
   | { type: "getExperts" }
+  /** Prefetch models catalog (and no-op if logged out). */
+  | { type: "warmup" }
   | {
       type: "setPrefs";
       sourceLang?: string;
       targetLang?: string;
       modelKey?: string | null;
       expertId?: string | null;
-      gmailEnabled?: boolean;
-      gmailTranslateMode?: GmailTranslateMode;
+      emailEnabled?: boolean;
+      emailTranslateMode?: EmailTranslateMode;
     }
   /** One-shot whole-email translate (keeps SW alive via returned Promise). */
   | {
@@ -48,8 +50,8 @@ export interface ExtensionState {
   targetLang: string;
   modelKey: string | null;
   expertId: string;
-  gmailEnabled: boolean;
-  gmailTranslateMode: GmailTranslateMode;
+  emailEnabled: boolean;
+  emailTranslateMode: EmailTranslateMode;
 }
 
 export type { AiExpertsPublicResponse, TranslateModelsResponse };

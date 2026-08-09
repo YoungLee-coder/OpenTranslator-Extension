@@ -1,11 +1,11 @@
-.ot-gmail-host {
+.ot-email-host {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 0 8px;
 }
 
-.ot-gmail-btn {
+.ot-email-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -22,36 +22,37 @@
   box-shadow: none;
 }
 
-.ot-gmail-btn:hover {
+.ot-email-btn:hover {
   border-color: rgba(33, 32, 28, 0.28);
   background: #efebe6;
 }
 
-.ot-gmail-btn:focus-visible {
+.ot-email-btn:focus-visible {
   outline: 2px solid #21201c;
   outline-offset: 2px;
 }
 
-.ot-gmail-btn--active {
+.ot-email-btn--active {
   border-color: rgba(33, 32, 28, 0.4);
   background: #e8e2da;
 }
 
-.ot-gmail-btn--error {
+.ot-email-btn--error {
   border-color: rgba(160, 40, 40, 0.35);
   color: #8a1f1f;
 }
 
-.ot-gmail-btn svg {
+.ot-email-btn svg {
   display: block;
   flex-shrink: 0;
 }
 
-.ot-gmail-btn-label {
+.ot-email-btn-label {
   font-weight: 500;
 }
 
 /* Bilingual translation blocks inserted by /api/translate/email display=bilingual */
+.ot-email-translation,
 .ot-gmail-translation {
   display: block;
   margin: 0.35em 0 0.75em;
@@ -74,7 +75,7 @@
   word-break: normal;
 }
 
-.ot-gmail-toast {
+.ot-email-toast {
   position: fixed;
   z-index: 2147483646;
   right: 24px;
