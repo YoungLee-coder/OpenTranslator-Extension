@@ -1,0 +1,51 @@
+.read-frog-translated-content-wrapper,
+.read-frog-translated-content-wrapper * {
+  overflow-wrap: anywhere;
+  word-break: normal;
+  user-select: text;
+  text-decoration-skip-ink: auto;
+}
+
+/*
+ * OpenTranslator: match host/original typography.
+ * Upstream read-frog forces CJK/Arabic font stacks via [lang]; we keep inherit
+ * so rich-mail styles (size, weight, color, family) flow into the translation.
+ */
+.read-frog-translated-block-content,
+.read-frog-translated-inline-content {
+  color: inherit;
+  background-color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  font-variant: inherit;
+  font-stretch: inherit;
+  letter-spacing: inherit;
+  word-spacing: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-decoration: inherit;
+  text-transform: inherit;
+  text-shadow: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+.read-frog-translated-block-content {
+  display: inline-block;
+  margin: 8px 0 !important;
+}
+
+.read-frog-translated-block-content[data-read-frog-float-wrap="true"] {
+  display: block !important;
+}
+
+.read-frog-translated-inline-content {
+  display: inline;
+}
+
+/* Neutralize any leftover lang-based font stacks from older injected sheets. */
+.read-frog-translated-content-wrapper[lang],
+.read-frog-translated-content-wrapper[lang] * {
+  font-family: inherit;
+}

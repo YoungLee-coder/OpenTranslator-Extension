@@ -1,10 +1,12 @@
 import type { ExtensionState } from "@/lib/messaging";
-import { getAuth, getPrefs } from "@/lib/storage";
+import { getAuth, getPrefs, resolveGmailTranslateMode } from "@/lib/storage";
 
 /** Read extension state from local storage only — no network. */
 export async function readExtensionState(): Promise<ExtensionState> {
   const auth = await getAuth();
   const prefs = await getPrefs();
+  const gmailEnabled = prefs.gmailEnabled !== false;
+  const gmailTranslateMode = resolveGmailTranslateMode(prefs.gmailTranslateMode);
   if (!auth) {
     return {
       bound: false,
@@ -12,6 +14,8 @@ export async function readExtensionState(): Promise<ExtensionState> {
       targetLang: prefs.targetLang,
       modelKey: prefs.modelKey ?? null,
       expertId: prefs.expertId ?? "general",
+      gmailEnabled,
+      gmailTranslateMode,
     };
   }
   return {
@@ -22,5 +26,7 @@ export async function readExtensionState(): Promise<ExtensionState> {
     targetLang: prefs.targetLang,
     modelKey: prefs.modelKey ?? null,
     expertId: prefs.expertId ?? "general",
+    gmailEnabled,
+    gmailTranslateMode,
   };
 }

@@ -1,4 +1,8 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "wxt";
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Fixed dev extension ID: gjmakoddcjjkfidekkkcmadihemhegfk — see docs/ORIGINS.md */
 const DEV_EXTENSION_KEY =
@@ -11,13 +15,18 @@ export default defineConfig({
     build: {
       modulePreload: false,
     },
+    resolve: {
+      alias: {
+        "#rf": path.resolve(rootDir, "vendor/read-frog"),
+      },
+    },
   }),
   manifest: {
     name: "OpenTranslator",
     description: "使用自托管 OpenTranslator 实例进行翻译",
     key: DEV_EXTENSION_KEY,
     permissions: ["storage", "alarms"],
-    host_permissions: ["http://localhost:8787/*"],
+    host_permissions: ["http://localhost:8787/*", "https://mail.google.com/*"],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     action: {
       default_title: "OpenTranslator",

@@ -51,6 +51,7 @@ export default function App() {
   const { models, reload: reloadModels } = useModels({
     enabled: state?.bound ?? false,
     userId: state?.user?.id,
+    onPrefsAdjusted: refresh,
   });
 
   useEffect(() => {

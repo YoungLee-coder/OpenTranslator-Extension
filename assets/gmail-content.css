@@ -1,0 +1,112 @@
+.ot-gmail-host {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+.ot-gmail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid rgba(33, 32, 28, 0.16);
+  border-radius: 999px;
+  background: #f5f2ef;
+  color: #21201c;
+  font: 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: pointer;
+  vertical-align: middle;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.ot-gmail-btn:hover {
+  border-color: rgba(33, 32, 28, 0.28);
+  background: #efebe6;
+}
+
+.ot-gmail-btn:focus-visible {
+  outline: 2px solid #21201c;
+  outline-offset: 2px;
+}
+
+.ot-gmail-btn--active {
+  border-color: rgba(33, 32, 28, 0.4);
+  background: #e8e2da;
+}
+
+.ot-gmail-btn--error {
+  border-color: rgba(160, 40, 40, 0.35);
+  color: #8a1f1f;
+}
+
+.ot-gmail-btn svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.ot-gmail-btn-label {
+  font-weight: 500;
+}
+
+/* Mirrors read-frog translated wrapper / block content */
+.ot-gmail-wrapper {
+  overflow-wrap: anywhere;
+  word-break: normal;
+  user-select: text;
+}
+
+.ot-gmail-translation {
+  display: inline-block;
+  margin: 8px 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  font-variant: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-decoration: inherit;
+  white-space: pre-wrap;
+}
+
+.ot-gmail-loading-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 4px;
+  vertical-align: middle;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  opacity: 0.55;
+  animation: ot-gmail-spin 0.7s linear infinite;
+}
+
+@keyframes ot-gmail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ot-gmail-toast {
+  position: fixed;
+  z-index: 2147483646;
+  right: 24px;
+  bottom: 24px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #21201c;
+  color: #f5f2ef;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}

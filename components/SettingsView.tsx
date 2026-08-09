@@ -13,7 +13,7 @@ import type { ExtensionState } from "@/lib/messaging";
 import { ensureHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { getDraftBaseUrl, setDraftBaseUrl } from "@/lib/storage";
-import type { PingResponse } from "@/types";
+import type { PingResponse, GmailTranslateMode } from "@/types";
 import "./settings.css";
 
 type SettingsViewProps = {
@@ -67,7 +67,11 @@ export default function SettingsView({
     models,
     loading: modelsLoading,
     error: modelsError,
-  } = useModels({ enabled: bound, userId: state?.user?.id });
+  } = useModels({
+    enabled: bound,
+    userId: state?.user?.id,
+    onPrefsAdjusted: refresh,
+  });
   const { experts, defaultExpertId } = useExperts({
     enabled: bound,
     userId: state?.user?.id,
@@ -231,6 +235,32 @@ export default function SettingsView({
     }
   };
 
+  const handleGmailEnabledChange = async (gmailEnabled: boolean) => {
+    clearMessages();
+    const res = await sendBg<ExtensionState>({ type: "setPrefs", gmailEnabled });
+    if (!res.ok) {
+      setError(formatApiError(res.error, res.status, res.kind));
+      return;
+    }
+    if (res.data) {
+      setState(res.data);
+      onStateChange?.(res.data);
+    }
+  };
+
+  const handleGmailTranslateModeChange = async (gmailTranslateMode: GmailTranslateMode) => {
+    clearMessages();
+    const res = await sendBg<ExtensionState>({ type: "setPrefs", gmailTranslateMode });
+    if (!res.ok) {
+      setError(formatApiError(res.error, res.status, res.kind));
+      return;
+    }
+    if (res.data) {
+      setState(res.data);
+      onStateChange?.(res.data);
+    }
+  };
+
   const handleBaseUrlChange = (value: string) => {
     setBaseUrl(value);
     resetPingState();
@@ -275,7 +305,10 @@ export default function SettingsView({
       <div className="settings-content">
         {!isSidepanel && (
           <header className="settings-page-header">
-            <BrandMark size={40} className="brand-mark settings-page-mark" />
+            <BrandMark
+              size={40}
+              className="brand-mark settings-page-mark text-foreground"
+            />
             <h1 className="font-display">OpenTranslator</h1>
             <p>连接你的自托管翻译实例并登录账号。</p>
           </header>
@@ -295,6 +328,8 @@ export default function SettingsView({
               busy={busy}
               onModelChange={(modelKey) => void handleModelChange(modelKey)}
               onExpertChange={(expertId) => void handleExpertChange(expertId)}
+              onGmailEnabledChange={(enabled) => void handleGmailEnabledChange(enabled)}
+              onGmailTranslateModeChange={(mode) => void handleGmailTranslateModeChange(mode)}
               onChangeInstance={() => void handleChangeInstance()}
               onLogout={() => void handleLogout()}
             />

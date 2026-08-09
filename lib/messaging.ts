@@ -1,5 +1,10 @@
 /** Side Panel / Options ↔ background message and port protocol. */
-import type { AiExpertsPublicResponse, AuthUser, TranslateModelsResponse } from "@/types";
+import type {
+  AiExpertsPublicResponse,
+  AuthUser,
+  GmailTranslateMode,
+  TranslateModelsResponse,
+} from "@/types";
 
 export type BgRequest =
   | { type: "ping"; baseUrl: string }
@@ -10,7 +15,15 @@ export type BgRequest =
   | { type: "clearAuth" }
   | { type: "getModels" }
   | { type: "getExperts" }
-  | { type: "setPrefs"; sourceLang?: string; targetLang?: string; modelKey?: string | null; expertId?: string | null };
+  | {
+      type: "setPrefs";
+      sourceLang?: string;
+      targetLang?: string;
+      modelKey?: string | null;
+      expertId?: string | null;
+      gmailEnabled?: boolean;
+      gmailTranslateMode?: GmailTranslateMode;
+    };
 
 export type BgResponse =
   | { ok: true; data?: unknown }
@@ -24,6 +37,8 @@ export interface ExtensionState {
   targetLang: string;
   modelKey: string | null;
   expertId: string;
+  gmailEnabled: boolean;
+  gmailTranslateMode: GmailTranslateMode;
 }
 
 export type { AiExpertsPublicResponse, TranslateModelsResponse };

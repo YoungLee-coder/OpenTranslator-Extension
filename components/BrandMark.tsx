@@ -1,9 +1,26 @@
 type BrandMarkProps = {
   size?: number;
   className?: string;
+  /** `mark` — in-app logo; `tile` — cream tile (matches manifest icon). */
+  variant?: "mark" | "tile";
+  /** Badge halo when variant is `mark`. */
+  haloFill?: string;
 };
 
-export default function BrandMark({ size = 28, className }: BrandMarkProps) {
+const LOGO_TILE_FILL = "#F5F2EF";
+const LOGO_STAR_PATH =
+  "M16 5 C18.8 9.5 18.8 13.4 27 16 C18.8 18.6 18.8 22.5 16 27 C13.2 22.5 13.2 18.6 5 16 C13.2 13.4 13.2 9.5 16 5 Z";
+const LOGO_BADGE = "25.75 23 28.5 25.75 25.75 28.5 23 25.75";
+const LOGO_BADGE_HALO = "25.75 22.25 29.25 25.75 25.75 29.25 22.25 25.75";
+
+export default function BrandMark({
+  size = 28,
+  className,
+  variant = "mark",
+  haloFill = "var(--background)",
+}: BrandMarkProps) {
+  const tile = variant === "tile";
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -14,22 +31,10 @@ export default function BrandMark({ size = 28, className }: BrandMarkProps) {
       role="img"
       aria-label="OpenTranslator"
     >
-      <circle cx="16" cy="16" r="16" fill="var(--primary)" />
-      <g
-        fill="none"
-        stroke="var(--primary-foreground)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        transform="translate(8 8) scale(0.667)"
-      >
-        <path d="m5 8 6 6" />
-        <path d="m4 14 6-6 2-3" />
-        <path d="M2 5h12" />
-        <path d="M7 2h1" />
-        <path d="m22 22-5-10-5 10" />
-        <path d="M14 18h6" />
-      </g>
+      {tile ? <rect width="32" height="32" rx="8" fill={LOGO_TILE_FILL} /> : null}
+      <path d={LOGO_STAR_PATH} fill="currentColor" />
+      <polygon points={LOGO_BADGE_HALO} fill={tile ? LOGO_TILE_FILL : haloFill} />
+      <polygon points={LOGO_BADGE} fill="currentColor" />
     </svg>
   );
 }

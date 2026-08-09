@@ -7,9 +7,9 @@ export function expertLabel(expert: AiExpertMeta | undefined): string {
   return expert.i18n?.["zh-CN"]?.name ?? expert.name;
 }
 
-/** Map stored expert id to API request body (omit for built-in general prompt). */
+/** Map stored expert id to API request body. Pass "general" explicitly so the server does not fall back to site default. */
 export function resolveExpertId(stored: string | null | undefined): string | undefined {
-  if (!stored || stored === GENERAL_EXPERT_ID) return undefined;
+  if (!stored) return undefined;
   return stored;
 }
 

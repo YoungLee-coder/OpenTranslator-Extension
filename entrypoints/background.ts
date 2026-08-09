@@ -1,7 +1,7 @@
 import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate } from "@/lib/api";
 import { resolveExpertId } from "@/lib/experts";
 import { decodeModelKey } from "@/lib/models";
-import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn } from "@/lib/messaging";
+import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslatePortOut } from "@/lib/messaging";
 import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getPrefs, setAuth, setPrefs } from "@/lib/storage";
@@ -135,6 +135,8 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           targetLang: request.targetLang,
           modelKey: request.modelKey,
           expertId: request.expertId,
+          gmailEnabled: request.gmailEnabled,
+          gmailTranslateMode: request.gmailTranslateMode,
         });
         const state = await readExtensionState();
         return { ok: true, data: state };
@@ -183,6 +185,17 @@ export default defineBackground(() => {
     if (port.name !== "translate") return;
 
     let abortController: AbortController | null = null;
+    let disconnected = false;
+
+    const post = (msg: TranslatePortOut) => {
+      if (disconnected) return;
+      try {
+        port.postMessage(msg);
+      } catch {
+        // Port already closed by the other end (common after abort / done).
+        disconnected = true;
+      }
+    };
 
     port.onMessage.addListener(async (msg: TranslatePortIn) => {
       if (msg.type === "abort") {
@@ -197,7 +210,7 @@ export default defineBackground(() => {
 
       const auth = await getAuth();
       if (!auth) {
-        port.postMessage({
+        post({
           type: "error",
           error: "请先登录你的 OpenTranslator 实例",
           unauthenticated: true,
@@ -210,7 +223,7 @@ export default defineBackground(() => {
         if (!session.authenticated) {
           await clearAuth();
           clearCatalogCaches();
-          port.postMessage({
+          post({
             type: "error",
             error: "登录已过期，请重新登录",
             status: 401,
@@ -244,39 +257,39 @@ export default defineBackground(() => {
           },
           signal,
         )) {
-          if (signal.aborted) {
-            port.postMessage({ type: "aborted" });
+          if (signal.aborted || disconnected) {
+            post({ type: "aborted" });
             return;
           }
           if (event.type === "delta") {
             translated += event.text;
-            port.postMessage({ type: "delta", text: event.text });
+            post({ type: "delta", text: event.text });
           } else if (event.type === "progress") {
-            port.postMessage({
+            post({
               type: "progress",
               chunkIndex: event.chunkIndex,
               chunkTotal: event.chunkTotal,
             });
           } else if (event.type === "done") {
-            port.postMessage({
+            post({
               type: "done",
               translatedText: event.translatedText || translated,
               detectedSourceLang: event.detectedSourceLang,
             });
           } else if (event.type === "error") {
-            port.postMessage({ type: "error", error: event.error });
+            post({ type: "error", error: event.error });
           }
         }
       } catch (err) {
-        if (signal.aborted) {
-          port.postMessage({ type: "aborted" });
+        if (signal.aborted || disconnected) {
+          post({ type: "aborted" });
           return;
         }
         if (err instanceof ApiError) {
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
             clearCatalogCaches();
-            port.postMessage({
+            post({
               type: "error",
               error: "登录已过期，请重新登录",
               status: err.status,
@@ -284,7 +297,7 @@ export default defineBackground(() => {
             });
             return;
           }
-          port.postMessage({
+          post({
             type: "error",
             error: err.message,
             status: err.status,
@@ -292,7 +305,7 @@ export default defineBackground(() => {
           });
           return;
         }
-        port.postMessage({
+        post({
           type: "error",
           error: err instanceof Error ? err.message : String(err),
         });
@@ -300,6 +313,7 @@ export default defineBackground(() => {
     });
 
     port.onDisconnect.addListener(() => {
+      disconnected = true;
       abortController?.abort();
     });
   });

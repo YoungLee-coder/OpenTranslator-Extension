@@ -50,7 +50,7 @@ export default function SettingsInstanceSetup({
     <section className="settings-setup" onKeyDown={onFormKeyDown}>
       {isSidepanel && (
         <div className="settings-setup-intro">
-          <BrandMark size={28} className="brand-mark" />
+          <BrandMark size={28} className="brand-mark text-foreground" />
           <h2 className="settings-setup-title">连接实例</h2>
           <p className="settings-setup-desc">绑定你的自托管 OpenTranslator 服务后即可开始翻译。</p>
         </div>

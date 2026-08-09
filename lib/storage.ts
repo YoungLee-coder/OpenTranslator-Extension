@@ -1,4 +1,4 @@
-import type { ExtensionAuth, ExtensionPrefs } from "@/types";
+import type { ExtensionAuth, ExtensionPrefs, GmailTranslateMode } from "@/types";
 
 const AUTH_KEY = "auth";
 const PREFS_KEY = "prefs";
@@ -9,7 +9,15 @@ const DEFAULT_PREFS: ExtensionPrefs = {
   targetLang: "zh-CN",
   modelKey: null,
   expertId: "general",
+  gmailEnabled: true,
+  gmailTranslateMode: "replace",
 };
+
+export function resolveGmailTranslateMode(
+  mode: GmailTranslateMode | undefined,
+): GmailTranslateMode {
+  return mode === "bilingual" ? "bilingual" : "replace";
+}
 
 export async function getAuth(): Promise<ExtensionAuth | null> {
   const result = await browser.storage.local.get(AUTH_KEY);
@@ -28,7 +36,12 @@ export async function clearAuth(): Promise<void> {
 
 export async function getPrefs(): Promise<ExtensionPrefs> {
   const result = await browser.storage.local.get(PREFS_KEY);
-  return { ...DEFAULT_PREFS, ...(result[PREFS_KEY] as ExtensionPrefs | undefined) };
+  const merged: ExtensionPrefs = {
+    ...DEFAULT_PREFS,
+    ...(result[PREFS_KEY] as ExtensionPrefs | undefined),
+  };
+  merged.gmailTranslateMode = resolveGmailTranslateMode(merged.gmailTranslateMode);
+  return merged;
 }
 
 export async function setPrefs(prefs: Partial<ExtensionPrefs>): Promise<void> {
@@ -38,6 +51,10 @@ export async function setPrefs(prefs: Partial<ExtensionPrefs>): Promise<void> {
   if (prefs.targetLang !== undefined) next.targetLang = prefs.targetLang;
   if (prefs.modelKey !== undefined) next.modelKey = prefs.modelKey;
   if (prefs.expertId !== undefined) next.expertId = prefs.expertId;
+  if (prefs.gmailEnabled !== undefined) next.gmailEnabled = prefs.gmailEnabled;
+  if (prefs.gmailTranslateMode !== undefined) {
+    next.gmailTranslateMode = resolveGmailTranslateMode(prefs.gmailTranslateMode);
+  }
   await browser.storage.local.set({ [PREFS_KEY]: next });
 }
 
