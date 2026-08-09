@@ -23,7 +23,18 @@ export type BgRequest =
       expertId?: string | null;
       gmailEnabled?: boolean;
       gmailTranslateMode?: GmailTranslateMode;
-    };
+    }
+  /** One-shot whole-email translate (keeps SW alive via returned Promise). */
+  | {
+      type: "translateEmail";
+      requestId: string;
+      html: string;
+      sourceLang: string;
+      targetLang: string;
+      preserveQuotes?: boolean;
+      display?: "replace" | "bilingual";
+    }
+  | { type: "abortTranslateEmail"; requestId: string };
 
 export type BgResponse =
   | { ok: true; data?: unknown }
@@ -55,6 +66,7 @@ export type TranslatePortIn =
 export type TranslatePortOut =
   | { type: "delta"; text: string }
   | { type: "progress"; chunkIndex: number; chunkTotal: number }
+  | { type: "keepalive" }
   | { type: "done"; translatedText: string; detectedSourceLang?: string }
   | {
       type: "error";
@@ -64,6 +76,11 @@ export type TranslatePortOut =
       retryAfterSeconds?: number;
     }
   | { type: "aborted" };
+
+export type TranslateEmailResult = {
+  translatedText: string;
+  detectedSourceLang?: string;
+};
 
 export function sendBg<T = unknown>(request: BgRequest): Promise<BgResponse & { data?: T }> {
   return browser.runtime.sendMessage(request);

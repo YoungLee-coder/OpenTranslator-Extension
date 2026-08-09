@@ -1,50 +1,47 @@
-import { translateOne } from "@/lib/gmail/client";
+import { translateEmailHtml } from "@/lib/gmail/client";
 import {
   applyReplacedHtml,
-  buildReplaceTranslatePrompt,
-  extractTranslatableHtml,
   hasReplacedTranslation,
-  restoreImagePlaceholders,
+  prepareEmailHtml,
   restoreOriginalHtml,
-  unwrapTranslatedHtml,
 } from "@/lib/gmail/html";
-import { MAX_TRANSLATE_CHARS } from "@/types";
+import type { TranslateEmailDisplay } from "@/types";
 
 export type ReplaceView = "original" | "translated";
 
 export type ReplaceCache = {
   originalHtml: string;
   translatedHtml: string;
-  preservedTailHtml: string;
   view: ReplaceView;
+  display: TranslateEmailDisplay;
 };
 
-const caches = new WeakMap<HTMLElement, ReplaceCache>();
+/** Keyed by stable message key — survives Gmail replacing the body element. */
+const caches = new Map<string, ReplaceCache>();
 
-export function getReplaceCache(body: HTMLElement): ReplaceCache | undefined {
-  return caches.get(body);
+export function getReplaceCache(messageKey: string): ReplaceCache | undefined {
+  return caches.get(messageKey);
 }
 
-export function clearReplaceCache(body: HTMLElement): void {
-  caches.delete(body);
-  if (hasReplacedTranslation(body)) {
-    // Leave DOM as-is; caller restores from cache before clear when needed.
+export function clearReplaceCache(messageKey: string, body?: HTMLElement): void {
+  caches.delete(messageKey);
+  if (body && hasReplacedTranslation(body)) {
     body.removeAttribute("data-ot-gmail-replaced");
   }
 }
 
-export function showOriginalFromCache(body: HTMLElement): boolean {
-  const cache = caches.get(body);
+export function showOriginalFromCache(messageKey: string, body: HTMLElement): boolean {
+  const cache = caches.get(messageKey);
   if (!cache) return false;
   restoreOriginalHtml(body, cache.originalHtml);
   cache.view = "original";
   return true;
 }
 
-export function showTranslatedFromCache(body: HTMLElement): boolean {
-  const cache = caches.get(body);
+export function showTranslatedFromCache(messageKey: string, body: HTMLElement): boolean {
+  const cache = caches.get(messageKey);
   if (!cache?.translatedHtml) return false;
-  applyReplacedHtml(body, cache.translatedHtml, cache.preservedTailHtml);
+  applyReplacedHtml(body, cache.translatedHtml);
   cache.view = "translated";
   return true;
 }
@@ -54,30 +51,46 @@ export type ReplaceTranslateResult =
   | { ok: false; error: string; unauthenticated?: boolean; cancelled?: boolean };
 
 /**
- * Snapshot body → clean HTML → one AI call → replace (quotes/signatures kept).
+ * Snapshot body → POST /api/translate/email → replace (quotes preserved server-side).
+ * `display: "bilingual"` asks the server for interleaved source + translation HTML.
+ * `resolveBody` is called after the network round-trip so we apply to the live node.
  */
 export async function runWholeEmailReplace(
-  body: HTMLElement,
+  messageKey: string,
+  resolveBody: () => HTMLElement | null,
   sourceLang: string,
   targetLang: string,
   signal: AbortSignal,
+  display: TranslateEmailDisplay = "replace",
 ): Promise<ReplaceTranslateResult> {
-  const originalHtml = body.innerHTML;
-  const extracted = extractTranslatableHtml(body);
-
-  if (!extracted.payloadHtml || extracted.plainLength === 0) {
+  const bodyAtStart = resolveBody();
+  if (!bodyAtStart) {
     return { ok: false, error: "未找到可翻译的正文" };
   }
 
-  const prompt = buildReplaceTranslatePrompt(extracted.payloadHtml, targetLang);
-  if (prompt.length > MAX_TRANSLATE_CHARS) {
-    return {
-      ok: false,
-      error: `原文过长，请缩短后再试（上限 ${MAX_TRANSLATE_CHARS.toLocaleString("zh-CN")} 字符）`,
-    };
+  // If a previous replace/bilingual view is still on the body, prefer the cached original.
+  let originalHtml = bodyAtStart.innerHTML;
+  if (hasReplacedTranslation(bodyAtStart)) {
+    const existing = caches.get(messageKey);
+    if (existing?.originalHtml) {
+      restoreOriginalHtml(bodyAtStart, existing.originalHtml);
+      originalHtml = existing.originalHtml;
+    }
   }
 
-  const result = await translateOne(prompt, sourceLang, targetLang, signal);
+  const prepared = prepareEmailHtml(bodyAtStart);
+
+  if (!prepared.html || prepared.plainLength === 0) {
+    return { ok: false, error: "未找到可翻译的正文" };
+  }
+
+  const result = await translateEmailHtml(
+    prepared.html,
+    sourceLang,
+    targetLang,
+    signal,
+    display,
+  );
   if (!result.ok) {
     return {
       ok: false,
@@ -87,21 +100,24 @@ export async function runWholeEmailReplace(
     };
   }
 
-  const rawHtml = unwrapTranslatedHtml(result.text);
-  if (!rawHtml) {
+  const translatedHtml = result.text.trim();
+  if (!translatedHtml) {
     return { ok: false, error: "译文为空" };
   }
 
-  const translatedHtml = restoreImagePlaceholders(rawHtml, extracted.imageMap);
+  const liveBody = resolveBody();
+  if (!liveBody) {
+    return { ok: false, error: "邮件正文已更新，请重试" };
+  }
 
-  applyReplacedHtml(body, translatedHtml, extracted.preservedTailHtml);
+  applyReplacedHtml(liveBody, translatedHtml);
 
   const cache: ReplaceCache = {
     originalHtml,
     translatedHtml,
-    preservedTailHtml: extracted.preservedTailHtml,
     view: "translated",
+    display,
   };
-  caches.set(body, cache);
+  caches.set(messageKey, cache);
   return { ok: true, cache };
 }

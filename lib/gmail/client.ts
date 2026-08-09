@@ -1,7 +1,8 @@
 import { formatApiError } from "@/lib/errors";
 import { sendBg } from "@/lib/messaging";
-import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
-import { MAX_TRANSLATE_CHARS } from "@/types";
+import type { ExtensionState, TranslateEmailResult } from "@/lib/messaging";
+import type { TranslateEmailDisplay } from "@/types";
+import { MAX_EMAIL_HTML_CHARS } from "@/types";
 
 export type TranslateOneResult =
   | { ok: true; text: string }
@@ -13,90 +14,63 @@ export async function loadExtensionState(): Promise<ExtensionState | null> {
   return res.data;
 }
 
-/**
- * Translate one paragraph via the background SSE port.
- * Resolves on done / error / abort / disconnect.
- */
-export function translateOne(
-  text: string,
+/** Whole-email HTML via one-shot background message (not Port — email SSE is silent until done). */
+export async function translateEmailHtml(
+  html: string,
   sourceLang: string,
   targetLang: string,
   signal: AbortSignal,
+  display: TranslateEmailDisplay = "replace",
 ): Promise<TranslateOneResult> {
-  const trimmed = text.trim();
+  const trimmed = html.trim();
   if (!trimmed) return Promise.resolve({ ok: true, text: "" });
-  if (trimmed.length > MAX_TRANSLATE_CHARS) {
+  if (trimmed.length > MAX_EMAIL_HTML_CHARS) {
     return Promise.resolve({
       ok: false,
-      error: `原文过长，请缩短后再试（上限 ${MAX_TRANSLATE_CHARS.toLocaleString("zh-CN")} 字符）`,
+      error: `原文过长，请缩短后再试（上限 ${MAX_EMAIL_HTML_CHARS.toLocaleString("zh-CN")} 字符）`,
     });
   }
+  if (signal.aborted) return { ok: false, error: "已取消" };
 
-  return new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve({ ok: false, error: "已取消" });
-      return;
-    }
+  const requestId =
+    globalThis.crypto?.randomUUID?.() ??
+    `email-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
-    const port = browser.runtime.connect({ name: "translate" });
-    let accumulated = "";
-    let settled = false;
+  const onAbort = () => {
+    void sendBg({ type: "abortTranslateEmail", requestId });
+  };
+  signal.addEventListener("abort", onAbort);
 
-    const settle = (result: TranslateOneResult) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      try {
-        port.disconnect();
-      } catch {
-        // ignore
-      }
-      resolve(result);
-    };
-
-    const onAbort = () => {
-      try {
-        port.postMessage({ type: "abort" });
-      } catch {
-        // ignore
-      }
-      settle({ ok: false, error: "已取消" });
-    };
-
-    signal.addEventListener("abort", onAbort);
-
-    port.onMessage.addListener((msg: TranslatePortOut) => {
-      if (msg.type === "delta") {
-        accumulated += msg.text;
-      } else if (msg.type === "done") {
-        settle({ ok: true, text: (msg.translatedText || accumulated).trim() });
-      } else if (msg.type === "error") {
-        settle({
-          ok: false,
-          error: formatApiError(
-            msg.error,
-            msg.status,
-            msg.status === 429 ? "api" : undefined,
-            msg.retryAfterSeconds,
-          ),
-          unauthenticated: msg.unauthenticated,
-        });
-      } else if (msg.type === "aborted") {
-        settle({ ok: false, error: "已取消" });
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      if (!settled) {
-        settle({ ok: false, error: "连接已断开" });
-      }
-    });
-
-    port.postMessage({
-      type: "start",
-      text: trimmed,
+  try {
+    const res = await sendBg<TranslateEmailResult>({
+      type: "translateEmail",
+      requestId,
+      html: trimmed,
       sourceLang,
       targetLang,
+      preserveQuotes: true,
+      display,
     });
-  });
+
+    if (signal.aborted) return { ok: false, error: "已取消" };
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: formatApiError(res.error || "翻译失败", res.status, res.kind),
+        unauthenticated: res.status === 401 || res.status === 403,
+      };
+    }
+
+    return { ok: true, text: (res.data?.translatedText || "").trim() };
+  } catch (err) {
+    if (signal.aborted) return { ok: false, error: "已取消" };
+    const message = err instanceof Error ? err.message : String(err);
+    if (/Extension context invalidated|Receiving end does not exist/i.test(message)) {
+      return { ok: false, error: "连接已断开" };
+    }
+    return { ok: false, error: message || "翻译失败" };
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }

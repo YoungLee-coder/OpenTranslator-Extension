@@ -1,4 +1,4 @@
-import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate } from "@/lib/api";
+import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate, streamTranslateEmail } from "@/lib/api";
 import { resolveExpertId } from "@/lib/experts";
 import { decodeModelKey } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslatePortOut } from "@/lib/messaging";
@@ -11,11 +11,15 @@ import { normalizeBaseUrl } from "@/lib/url";
 const SESSION_ALARM = "session-check";
 const SESSION_CHECK_MINUTES = 30;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
+const PORT_KEEPALIVE_MS = 20_000;
 
 type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
 
 let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
 let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
+
+/** In-flight one-shot email translates (sendMessage keeps SW alive until Promise settles). */
+const emailAborts = new Map<string, AbortController>();
 
 function clearCatalogCaches() {
   modelsCache = null;
@@ -141,6 +145,93 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         const state = await readExtensionState();
         return { ok: true, data: state };
       }
+      case "abortTranslateEmail": {
+        emailAborts.get(request.requestId)?.abort();
+        emailAborts.delete(request.requestId);
+        return { ok: true };
+      }
+      case "translateEmail": {
+        const auth = await getAuth();
+        if (!auth) {
+          return fail("请先登录你的 OpenTranslator 实例", 401);
+        }
+
+        const session = await me(auth.baseUrl, auth.token);
+        if (!session.authenticated) {
+          await clearAuth();
+          clearCatalogCaches();
+          return fail("登录已过期，请重新登录", 401);
+        }
+
+        const prefs = await getPrefs();
+        let providerId: string | undefined;
+        let model: string | undefined;
+        if (prefs.modelKey) {
+          try {
+            ({ providerId, model } = decodeModelKey(prefs.modelKey));
+          } catch {
+            // ignore invalid stored key; server falls back to default provider
+          }
+        }
+
+        const abort = new AbortController();
+        emailAborts.set(request.requestId, abort);
+
+        try {
+          let translated = "";
+          let detectedSourceLang: string | undefined;
+          for await (const event of streamTranslateEmail(
+            auth.baseUrl,
+            auth.token,
+            {
+              html: request.html,
+              sourceLang: request.sourceLang,
+              targetLang: request.targetLang,
+              providerId,
+              model,
+              preserveQuotes: request.preserveQuotes !== false,
+              display: request.display === "bilingual" ? "bilingual" : "replace",
+            },
+            abort.signal,
+          )) {
+            if (abort.signal.aborted) {
+              return fail("已取消");
+            }
+            if (event.type === "delta") {
+              translated += event.text;
+            } else if (event.type === "done") {
+              translated = event.translatedText || translated;
+              detectedSourceLang = event.detectedSourceLang;
+            } else if (event.type === "error") {
+              return fail(event.error);
+            }
+          }
+
+          const text = translated.trim();
+          if (!text) {
+            return fail("译文为空");
+          }
+          return {
+            ok: true,
+            data: { translatedText: text, detectedSourceLang },
+          };
+        } catch (err) {
+          if (abort.signal.aborted) {
+            return fail("已取消");
+          }
+          if (err instanceof ApiError) {
+            if (err.status === 401 || err.status === 403) {
+              await clearAuth();
+              clearCatalogCaches();
+              return fail("登录已过期，请重新登录", err.status);
+            }
+            return fail(err.message, err.status, err.kind);
+          }
+          return fail(err instanceof Error ? err.message : String(err));
+        } finally {
+          emailAborts.delete(request.requestId);
+        }
+      }
       default:
         return fail("未知请求");
     }
@@ -186,6 +277,21 @@ export default defineBackground(() => {
 
     let abortController: AbortController | null = null;
     let disconnected = false;
+    let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+    const stopKeepAlive = () => {
+      if (keepAliveTimer != null) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
+    };
+
+    const startKeepAlive = () => {
+      stopKeepAlive();
+      keepAliveTimer = setInterval(() => {
+        post({ type: "keepalive" });
+      }, PORT_KEEPALIVE_MS);
+    };
 
     const post = (msg: TranslatePortOut) => {
       if (disconnected) return;
@@ -194,6 +300,7 @@ export default defineBackground(() => {
       } catch {
         // Port already closed by the other end (common after abort / done).
         disconnected = true;
+        stopKeepAlive();
       }
     };
 
@@ -202,14 +309,17 @@ export default defineBackground(() => {
         abortController?.abort();
         return;
       }
+      // Email translate uses sendMessage (translateEmail); Port is for streaming text.
       if (msg.type !== "start") return;
 
       abortController?.abort();
       abortController = new AbortController();
       const signal = abortController.signal;
+      startKeepAlive();
 
       const auth = await getAuth();
       if (!auth) {
+        stopKeepAlive();
         post({
           type: "error",
           error: "请先登录你的 OpenTranslator 实例",
@@ -223,6 +333,7 @@ export default defineBackground(() => {
         if (!session.authenticated) {
           await clearAuth();
           clearCatalogCaches();
+          stopKeepAlive();
           post({
             type: "error",
             error: "登录已过期，请重新登录",
@@ -244,6 +355,7 @@ export default defineBackground(() => {
         }
 
         let translated = "";
+        let sawTerminal = false;
         for await (const event of streamTranslate(
           auth.baseUrl,
           auth.token,
@@ -271,13 +383,22 @@ export default defineBackground(() => {
               chunkTotal: event.chunkTotal,
             });
           } else if (event.type === "done") {
+            sawTerminal = true;
             post({
               type: "done",
               translatedText: event.translatedText || translated,
               detectedSourceLang: event.detectedSourceLang,
             });
           } else if (event.type === "error") {
+            sawTerminal = true;
             post({ type: "error", error: event.error });
+          }
+        }
+        if (!sawTerminal && !signal.aborted && !disconnected) {
+          if (translated.trim()) {
+            post({ type: "done", translatedText: translated });
+          } else {
+            post({ type: "error", error: "翻译未完成，请重试" });
           }
         }
       } catch (err) {
@@ -309,11 +430,14 @@ export default defineBackground(() => {
           type: "error",
           error: err instanceof Error ? err.message : String(err),
         });
+      } finally {
+        stopKeepAlive();
       }
     });
 
     port.onDisconnect.addListener(() => {
       disconnected = true;
+      stopKeepAlive();
       abortController?.abort();
     });
   });

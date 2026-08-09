@@ -1,18 +1,12 @@
 import "@/assets/gmail-content.css";
-import {
-  buildBilingualConfig,
-  ensureEngineStyles,
-  hasEngineTranslations,
-  registerTranslateTextForPage,
-  removeTranslationsInScope,
-  setTranslateSession,
-} from "@/lib/read-frog-adapter";
 import { loadExtensionState } from "@/lib/gmail/client";
 import {
   OT_BTN_ATTR,
   findMessageRoot,
   findOpenMessageBodies,
   findToolbarHost,
+  getOrCreateMessageKey,
+  gmailRouteKey,
 } from "@/lib/gmail/dom";
 import {
   clearReplaceCache,
@@ -31,58 +25,90 @@ import {
   showToast,
 } from "@/lib/gmail/ui";
 import type { GmailTranslateMode } from "@/types";
-import { walkAndLabelElement } from "#rf/utils/host/dom/traversal";
-import { translateWalkedElement } from "#rf/utils/host/translate/core/translation-walker";
-import { createWorkPacer } from "#rf/utils/scheduler";
-import { getRandomUUID } from "#rf/utils/utils";
 
 type Session = {
   abort: AbortController | null;
   running: boolean;
+  /** Latest live body node for this message (Gmail may replace `.a3s`). */
+  body: HTMLElement;
+  btn: HTMLButtonElement | null;
 };
 
-const sessions = new WeakMap<HTMLElement, Session>();
-let translateImplRegistered = false;
+const sessions = new Map<string, Session>();
 let gmailEnabled = true;
 let gmailTranslateMode: GmailTranslateMode = "replace";
 
-function ensureTranslateImpl(): void {
-  if (translateImplRegistered) return;
-  registerTranslateTextForPage();
-  translateImplRegistered = true;
-}
-
-function getSession(body: HTMLElement): Session {
-  let s = sessions.get(body);
+function getSession(messageKey: string, body: HTMLElement): Session {
+  let s = sessions.get(messageKey);
   if (!s) {
-    s = { abort: null, running: false };
-    sessions.set(body, s);
+    s = { abort: null, running: false, body, btn: null };
+    sessions.set(messageKey, s);
+  } else {
+    s.body = body;
   }
   return s;
 }
 
+function resolveLiveBody(messageKey: string, fallback: HTMLElement): HTMLElement | null {
+  const session = sessions.get(messageKey);
+  if (session?.body?.isConnected) return session.body;
+
+  for (const body of findOpenMessageBodies()) {
+    if (getOrCreateMessageKey(body) === messageKey) {
+      if (session) session.body = body;
+      return body;
+    }
+  }
+
+  return fallback.isConnected ? fallback : null;
+}
+
+function resolveLiveButton(
+  messageKey: string,
+  body: HTMLElement,
+  fallback: HTMLButtonElement | null,
+): HTMLButtonElement | null {
+  const session = sessions.get(messageKey);
+  if (session?.btn?.isConnected) return session.btn;
+
+  const root = findMessageRoot(body);
+  const fromRoot = root.querySelector(`[${OT_BTN_ATTR}]`);
+  if (fromRoot instanceof HTMLButtonElement) {
+    if (session) session.btn = fromRoot;
+    return fromRoot;
+  }
+
+  const prev = body.previousElementSibling;
+  if (prev instanceof HTMLElement) {
+    const fromHost = prev.querySelector(`[${OT_BTN_ATTR}]`);
+    if (fromHost instanceof HTMLButtonElement) {
+      if (session) session.btn = fromHost;
+      return fromHost;
+    }
+  }
+
+  return fallback?.isConnected ? fallback : null;
+}
+
 function syncButtonFromDom(
   btn: HTMLButtonElement,
+  messageKey: string,
   body: HTMLElement,
   mode: GmailTranslateMode = gmailTranslateMode,
 ): void {
-  const session = getSession(body);
+  const session = getSession(messageKey, body);
+  session.btn = btn;
   if (session.running) {
-    setButtonPhase(btn, mode === "replace" ? "loading" : "stop", "翻译中", mode);
+    setButtonPhase(btn, "loading", "翻译中", mode);
     return;
   }
 
-  if (mode === "bilingual") {
-    if (hasEngineTranslations(body)) {
-      setButtonPhase(btn, "done", undefined, mode);
-    } else {
-      setButtonPhase(btn, "idle", undefined, mode);
-    }
-    return;
-  }
-
-  const cache = getReplaceCache(body);
+  const cache = getReplaceCache(messageKey);
   if (cache?.view === "translated") {
+    // Body was replaced after a successful translate — re-apply cached HTML.
+    if (!body.hasAttribute("data-ot-gmail-replaced") && cache.translatedHtml) {
+      showTranslatedFromCache(messageKey, body);
+    }
     setButtonPhase(btn, "done", undefined, mode);
   } else if (cache?.view === "original" && cache.translatedHtml) {
     setButtonPhase(btn, "show-translation", undefined, mode);
@@ -91,124 +117,46 @@ function syncButtonFromDom(
   }
 }
 
-async function runBilingualTranslate(btn: HTMLButtonElement, body: HTMLElement): Promise<void> {
-  const session = getSession(body);
+async function runEmailTranslate(
+  btn: HTMLButtonElement,
+  messageKey: string,
+  body: HTMLElement,
+  mode: GmailTranslateMode,
+): Promise<void> {
+  const session = getSession(messageKey, body);
+  session.btn = btn;
   if (session.running) {
     session.abort?.abort();
     return;
   }
 
-  if (hasEngineTranslations(body)) {
-    removeTranslationsInScope(body);
-    setButtonPhase(btn, "idle", undefined, "bilingual");
+  const cache = getReplaceCache(messageKey);
+  // Mode mismatch (user switched settings): drop stale cache and retranslate.
+  if (cache && cache.display !== mode) {
+    if (cache.view === "translated") {
+      showOriginalFromCache(messageKey, body);
+    }
+    clearReplaceCache(messageKey, body);
+  } else if (cache?.view === "translated") {
+    showOriginalFromCache(messageKey, body);
+    setButtonPhase(btn, "show-translation", undefined, mode);
+    return;
+  } else if (cache?.view === "original" && cache.translatedHtml) {
+    showTranslatedFromCache(messageKey, body);
+    setButtonPhase(btn, "done", undefined, mode);
     return;
   }
 
   if (!gmailEnabled) {
     showToast("Gmail 翻译已关闭，请在设置中开启");
-    setButtonPhase(btn, "idle", undefined, "bilingual");
+    setButtonPhase(btn, "idle", undefined, mode);
     return;
   }
 
   const state = await loadExtensionState();
   if (!state?.bound) {
     showToast("请先打开 OpenTranslator 侧边栏并登录实例");
-    setButtonPhase(btn, "error", "未登录", "bilingual");
-    return;
-  }
-
-  ensureTranslateImpl();
-  ensureGmailLayoutCss();
-
-  const config = buildBilingualConfig({
-    sourceLang: state.sourceLang,
-    targetLang: state.targetLang,
-  });
-  await ensureEngineStyles(config);
-
-  const abort = new AbortController();
-  session.abort = abort;
-  session.running = true;
-  setButtonPhase(btn, "stop", undefined, "bilingual");
-  setTranslateSession(state.sourceLang, state.targetLang, abort.signal);
-
-  const walkId = getRandomUUID();
-  const shouldContinue = () => !abort.signal.aborted;
-
-  try {
-    walkAndLabelElement(body, walkId, config);
-    await translateWalkedElement(
-      body,
-      walkId,
-      config,
-      false,
-      createWorkPacer(),
-      shouldContinue,
-    );
-
-    if (abort.signal.aborted) {
-      removeTranslationsInScope(body);
-      setButtonPhase(btn, "idle", undefined, "bilingual");
-      return;
-    }
-
-    if (!hasEngineTranslations(body)) {
-      showToast("未找到可翻译的正文");
-      setButtonPhase(btn, "error", undefined, "bilingual");
-      return;
-    }
-
-    setButtonPhase(btn, "done", undefined, "bilingual");
-  } catch (err) {
-    if (abort.signal.aborted) {
-      removeTranslationsInScope(body);
-      setButtonPhase(btn, "idle", undefined, "bilingual");
-      return;
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    if (/未登录|登录|unauth|401/i.test(message)) {
-      showToast("登录已过期，请打开侧边栏重新登录");
-    } else {
-      showToast(message || "翻译失败");
-    }
-    removeTranslationsInScope(body);
-    setButtonPhase(btn, "error", message, "bilingual");
-  } finally {
-    session.running = false;
-    session.abort = null;
-    setTranslateSession(state.sourceLang, state.targetLang, null);
-  }
-}
-
-async function runReplaceTranslate(btn: HTMLButtonElement, body: HTMLElement): Promise<void> {
-  const session = getSession(body);
-  if (session.running) {
-    session.abort?.abort();
-    return;
-  }
-
-  const cache = getReplaceCache(body);
-  if (cache?.view === "translated") {
-    showOriginalFromCache(body);
-    setButtonPhase(btn, "show-translation", undefined, "replace");
-    return;
-  }
-  if (cache?.view === "original" && cache.translatedHtml) {
-    showTranslatedFromCache(body);
-    setButtonPhase(btn, "done", undefined, "replace");
-    return;
-  }
-
-  if (!gmailEnabled) {
-    showToast("Gmail 翻译已关闭，请在设置中开启");
-    setButtonPhase(btn, "idle", undefined, "replace");
-    return;
-  }
-
-  const state = await loadExtensionState();
-  if (!state?.bound) {
-    showToast("请先打开 OpenTranslator 侧边栏并登录实例");
-    setButtonPhase(btn, "error", "未登录", "replace");
+    setButtonPhase(btn, "error", "未登录", mode);
     return;
   }
 
@@ -217,18 +165,23 @@ async function runReplaceTranslate(btn: HTMLButtonElement, body: HTMLElement): P
   const abort = new AbortController();
   session.abort = abort;
   session.running = true;
-  setButtonPhase(btn, "loading", "翻译中", "replace");
+  setButtonPhase(btn, "loading", "翻译中", mode);
 
   try {
     const result = await runWholeEmailReplace(
-      body,
+      messageKey,
+      () => resolveLiveBody(messageKey, body),
       state.sourceLang,
       state.targetLang,
       abort.signal,
+      mode,
     );
 
+    const finalBody = resolveLiveBody(messageKey, body) ?? body;
+    const finalBtn = resolveLiveButton(messageKey, finalBody, btn);
+
     if (abort.signal.aborted || (!result.ok && result.cancelled)) {
-      setButtonPhase(btn, "idle", undefined, "replace");
+      if (finalBtn) setButtonPhase(finalBtn, "idle", undefined, mode);
       return;
     }
 
@@ -238,19 +191,21 @@ async function runReplaceTranslate(btn: HTMLButtonElement, body: HTMLElement): P
       } else {
         showToast(result.error || "翻译失败");
       }
-      setButtonPhase(btn, "error", result.error, "replace");
+      if (finalBtn) setButtonPhase(finalBtn, "error", result.error, mode);
       return;
     }
 
-    setButtonPhase(btn, "done", undefined, "replace");
+    if (finalBtn) setButtonPhase(finalBtn, "done", undefined, mode);
   } catch (err) {
+    const finalBody = resolveLiveBody(messageKey, body) ?? body;
+    const finalBtn = resolveLiveButton(messageKey, finalBody, btn);
     if (abort.signal.aborted) {
-      setButtonPhase(btn, "idle", undefined, "replace");
+      if (finalBtn) setButtonPhase(finalBtn, "idle", undefined, mode);
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
     showToast(message || "翻译失败");
-    setButtonPhase(btn, "error", message, "replace");
+    if (finalBtn) setButtonPhase(finalBtn, "error", message, mode);
   } finally {
     session.running = false;
     session.abort = null;
@@ -258,53 +213,49 @@ async function runReplaceTranslate(btn: HTMLButtonElement, body: HTMLElement): P
 }
 
 async function handleButtonClick(btn: HTMLButtonElement, body: HTMLElement): Promise<void> {
+  const messageKey = getOrCreateMessageKey(body);
+  getSession(messageKey, body).btn = btn;
+
   // Prefer live prefs so a settings change applies without reload.
   const prefs = await getPrefs();
   const mode = resolveGmailTranslateMode(prefs.gmailTranslateMode);
   gmailTranslateMode = mode;
 
-  if (mode === "bilingual") {
-    // Leaving replace view: restore original if we had swapped the body.
-    const cache = getReplaceCache(body);
-    if (cache?.view === "translated") {
-      showOriginalFromCache(body);
-    }
-    clearReplaceCache(body);
-    await runBilingualTranslate(btn, body);
-    return;
-  }
-
-  // Leaving bilingual: clear inserted wrappers so replace sees clean source.
-  if (hasEngineTranslations(body)) {
-    removeTranslationsInScope(body);
-  }
-  await runReplaceTranslate(btn, body);
+  const live = resolveLiveBody(messageKey, body) ?? body;
+  await runEmailTranslate(btn, messageKey, live, mode);
 }
 
 function ensureButtonForBody(body: HTMLElement): void {
+  const messageKey = getOrCreateMessageKey(body);
+  const session = getSession(messageKey, body);
   const root = findMessageRoot(body);
-  if (root.querySelector(`[${OT_BTN_ATTR}]`)) {
-    const existing = root.querySelector(`[${OT_BTN_ATTR}]`);
-    if (existing instanceof HTMLButtonElement) {
-      syncButtonFromDom(existing, body, gmailTranslateMode);
-    }
+
+  const existingInRoot = root.querySelector(`[${OT_BTN_ATTR}]`);
+  if (existingInRoot instanceof HTMLButtonElement) {
+    syncButtonFromDom(existingInRoot, messageKey, body, gmailTranslateMode);
     return;
   }
 
   const prev = body.previousElementSibling;
-  if (prev instanceof HTMLElement && prev.querySelector(`[${OT_BTN_ATTR}]`)) {
-    return;
+  if (prev instanceof HTMLElement) {
+    const existingInHost = prev.querySelector(`[${OT_BTN_ATTR}]`);
+    if (existingInHost instanceof HTMLButtonElement) {
+      syncButtonFromDom(existingInHost, messageKey, body, gmailTranslateMode);
+      return;
+    }
   }
 
   const btn = createTranslateButton(gmailTranslateMode);
   const toolbar = findToolbarHost(root, body);
   mountButton(btn, toolbar, body);
-  syncButtonFromDom(btn, body, gmailTranslateMode);
+  session.btn = btn;
+  syncButtonFromDom(btn, messageKey, body, gmailTranslateMode);
 
   btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    void handleButtonClick(btn, body);
+    const live = resolveLiveBody(messageKey, body) ?? body;
+    void handleButtonClick(btn, live);
   });
 }
 
@@ -314,18 +265,26 @@ function scanAndInject(): void {
     return;
   }
   ensureGmailLayoutCss();
+
+  const liveKeys = new Set<string>();
   for (const body of findOpenMessageBodies()) {
+    liveKeys.add(getOrCreateMessageKey(body));
     ensureButtonForBody(body);
+  }
+
+  // Drop sessions for messages no longer in the reading pane (keep running ones).
+  for (const [key, session] of sessions) {
+    if (!liveKeys.has(key) && !session.running) {
+      sessions.delete(key);
+    }
   }
 }
 
 function abortAllRunning(): void {
-  document.querySelectorAll(`[${OT_BTN_ATTR}]`).forEach((node) => {
-    if (!(node instanceof HTMLButtonElement)) return;
-    if (node.dataset.otPhase === "stop" || node.dataset.otPhase === "loading") {
-      node.click();
-    }
-  });
+  for (const session of sessions.values()) {
+    if (!session.running) continue;
+    session.abort?.abort();
+  }
 }
 
 function applyGmailPrefs(enabled: boolean, mode: GmailTranslateMode): void {
@@ -345,14 +304,12 @@ function applyGmailPrefs(enabled: boolean, mode: GmailTranslateMode): void {
 
   if (modeChanged) {
     for (const body of findOpenMessageBodies()) {
-      const cache = getReplaceCache(body);
+      const key = getOrCreateMessageKey(body);
+      const cache = getReplaceCache(key);
       if (cache?.view === "translated") {
-        showOriginalFromCache(body);
+        showOriginalFromCache(key, body);
       }
-      clearReplaceCache(body);
-      if (hasEngineTranslations(body)) {
-        removeTranslationsInScope(body);
-      }
+      clearReplaceCache(key, body);
     }
   }
 
@@ -390,15 +347,17 @@ export default defineContentScript({
       subtree: true,
     });
 
-    let lastHref = location.href;
+    // Only abort on real Gmail route changes (hash/path). Query-string churn is ignored.
+    let lastRoute = gmailRouteKey();
     const checkNav = () => {
-      if (location.href !== lastHref) {
-        lastHref = location.href;
-        abortAllRunning();
-        scheduleScan();
-      }
+      const next = gmailRouteKey();
+      if (next === lastRoute) return;
+      lastRoute = next;
+      abortAllRunning();
+      scheduleScan();
     };
     window.addEventListener("popstate", checkNav);
+    window.addEventListener("hashchange", checkNav);
     window.setInterval(checkNav, 800);
 
     browser.storage.onChanged.addListener((changes, area) => {

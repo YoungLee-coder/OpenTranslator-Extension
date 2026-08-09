@@ -190,7 +190,7 @@ export default function SettingsAccountHub({
                 aria-label="Gmail 翻译方式"
                 title={
                   state.gmailTranslateMode === "bilingual"
-                    ? "逐段翻译并对照显示"
+                    ? "整封生成双语对照 HTML，可切换回原文"
                     : "整封一次翻译并替换正文，可还原原文"
                 }
               >

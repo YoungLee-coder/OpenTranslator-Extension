@@ -80,6 +80,22 @@ export interface TranslateRequest {
   expertId?: string;
 }
 
+/** How the email HTML translation should be rendered. */
+export type TranslateEmailDisplay = "replace" | "bilingual";
+
+/** POST /api/translate/email — whole-email HTML translation. */
+export interface TranslateEmailRequest {
+  html: string;
+  sourceLang: string;
+  targetLang: string;
+  stream?: boolean;
+  providerId?: string;
+  model?: string;
+  preserveQuotes?: boolean;
+  /** `replace` (default) or interleaved bilingual HTML. */
+  display?: TranslateEmailDisplay;
+}
+
 export type TranslateStreamEvent =
   | { type: "delta"; text: string }
   | {
@@ -98,6 +114,8 @@ export type TranslateStreamEvent =
 
 /** Max source characters accepted by POST /api/translate. */
 export const MAX_TRANSLATE_CHARS = 80_000;
+/** Max HTML characters accepted by POST /api/translate/email. */
+export const MAX_EMAIL_HTML_CHARS = 80_000;
 
 export interface ExtensionAuth {
   baseUrl: string;

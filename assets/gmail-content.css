@@ -51,20 +51,15 @@
   font-weight: 500;
 }
 
-/* Mirrors read-frog translated wrapper / block content */
-.ot-gmail-wrapper {
-  overflow-wrap: anywhere;
-  word-break: normal;
-  user-select: text;
-}
-
+/* Bilingual translation blocks inserted by /api/translate/email display=bilingual */
 .ot-gmail-translation {
-  display: inline-block;
-  margin: 8px 0;
+  display: block;
+  margin: 0.35em 0 0.75em;
   padding: 0;
   border: none;
   background: transparent;
   color: inherit;
+  opacity: 0.88;
   font-family: inherit;
   font-size: inherit;
   font-weight: inherit;
@@ -75,25 +70,8 @@
   text-align: inherit;
   text-decoration: inherit;
   white-space: pre-wrap;
-}
-
-.ot-gmail-loading-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin: 0 4px;
-  vertical-align: middle;
-  border-radius: 50%;
-  border: 1.5px solid transparent;
-  border-top-color: currentColor;
-  opacity: 0.55;
-  animation: ot-gmail-spin 0.7s linear infinite;
-}
-
-@keyframes ot-gmail-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .ot-gmail-toast {

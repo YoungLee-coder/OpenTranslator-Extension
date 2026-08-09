@@ -4,6 +4,7 @@ import type {
   AuthSessionResponse,
   LoginRequest,
   PingResponse,
+  TranslateEmailRequest,
   TranslateModelsResponse,
   TranslateRequest,
   TranslateStreamEvent,
@@ -191,6 +192,49 @@ export async function* streamTranslate(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ ...req, stream: true }),
+      signal,
+    });
+  } catch (err) {
+    throw wrapFetchError(err);
+  }
+
+  if (!res.ok || !res.body) {
+    if (res.status === 429) {
+      const body = await readErrorBody(res);
+      throw new ApiError(
+        429,
+        formatRateLimitMessage(body.retryAfterSeconds),
+        "api",
+        body.retryAfterSeconds,
+      );
+    }
+    throw new ApiError(res.status, await readErrorMessage(res));
+  }
+
+  yield* parseSseStream(res.body, signal);
+}
+
+/** POST /api/translate/email — layout-preserving whole-email HTML translation. */
+export async function* streamTranslateEmail(
+  baseUrl: string,
+  token: string,
+  req: TranslateEmailRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<TranslateStreamEvent> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/translate/email`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        ...req,
+        stream: true,
+        preserveQuotes: req.preserveQuotes !== false,
+        display: req.display === "bilingual" ? "bilingual" : "replace",
+      }),
       signal,
     });
   } catch (err) {

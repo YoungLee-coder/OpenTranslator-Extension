@@ -22,6 +22,38 @@ const TOOLBAR_SELECTORS = [
 
 export const OT_BTN_ATTR = "data-ot-gmail-btn";
 export const OT_HOST_ATTR = "data-ot-gmail-host";
+/** Stamped on the message root so sessions survive Gmail replacing `.a3s` bodies. */
+export const OT_MSG_KEY_ATTR = "data-ot-msg-key";
+
+let msgKeySeq = 0;
+
+/**
+ * Stable id for a Gmail message view. Prefer Gmail's data-message-id; otherwise
+ * stamp a key on the message root so body node churn does not orphan sessions.
+ */
+export function getOrCreateMessageKey(body: HTMLElement): string {
+  const root = findMessageRoot(body);
+  const stamped = root.getAttribute(OT_MSG_KEY_ATTR);
+  if (stamped) return stamped;
+
+  const fromAttr =
+    root.getAttribute("data-message-id") ||
+    body.closest("[data-message-id]")?.getAttribute("data-message-id") ||
+    body.getAttribute("data-message-id");
+  const key = fromAttr ? `mid:${fromAttr}` : `gen:${Date.now().toString(36)}-${++msgKeySeq}`;
+  root.setAttribute(OT_MSG_KEY_ATTR, key);
+  return key;
+}
+
+/** Gmail thread/message identity from the URL hash (ignores volatile query params). */
+export function gmailRouteKey(href: string = location.href): string {
+  try {
+    const url = new URL(href);
+    return `${url.pathname}${url.hash}`;
+  } catch {
+    return href;
+  }
+}
 
 /** Open message bodies currently in the reading pane (not compose). */
 export function findOpenMessageBodies(): HTMLElement[] {

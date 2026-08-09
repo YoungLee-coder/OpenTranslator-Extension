@@ -3,8 +3,8 @@ import { OT_BTN_ATTR, OT_HOST_ATTR } from "./dom";
 
 export type ButtonPhase = "idle" | "loading" | "done" | "error" | "stop" | "show-translation";
 
+/** Mark-style logo (no cream tile) — matches BrandMark `variant="mark"`. */
 const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
-  <rect width="32" height="32" rx="8" fill="#F5F2EF"/>
   <path fill="#21201C" d="M16 5 C18.8 9.5 18.8 13.4 27 16 C18.8 18.6 18.8 22.5 16 27 C13.2 22.5 13.2 18.6 5 16 C13.2 13.4 13.2 9.5 16 5 Z"/>
   <polygon fill="#F5F2EF" points="25.75 22.25 29.25 25.75 25.75 29.25 22.25 25.75"/>
   <polygon fill="#21201C" points="25.75 23 28.5 25.75 25.75 28.5 23 25.75"/>
@@ -13,7 +13,7 @@ const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" wi
 const GMAIL_LAYOUT_STYLE_ID = "ot-gmail-layout-fix";
 
 /**
- * From read-frog site rule for mail.google.com — allow translated rows to grow.
+ * Allow Gmail message rows to grow when bilingual translation blocks are inserted.
  */
 export function ensureGmailLayoutCss(): void {
   if (document.getElementById(GMAIL_LAYOUT_STYLE_ID)) return;
@@ -63,7 +63,7 @@ export function setButtonPhase(
       break;
     case "loading":
       label.textContent = detail ?? "翻译中";
-      btn.title = bilingual ? "正在翻译，点击可停止" : "正在整封翻译，点击可停止";
+      btn.title = bilingual ? "正在生成双语对照，点击可停止" : "正在整封翻译，点击可停止";
       btn.setAttribute("aria-label", btn.title);
       btn.disabled = false;
       break;
@@ -74,18 +74,13 @@ export function setButtonPhase(
       btn.disabled = false;
       break;
     case "done":
-      if (bilingual) {
-        label.textContent = "清除";
-        btn.title = "清除对照译文";
-      } else {
-        label.textContent = "原文";
-        btn.title = "显示原文";
-      }
+      label.textContent = "原文";
+      btn.title = bilingual ? "显示原文（隐藏对照）" : "显示原文";
       btn.setAttribute("aria-label", btn.title);
       break;
     case "show-translation":
-      label.textContent = "译文";
-      btn.title = "显示译文";
+      label.textContent = bilingual ? "对照" : "译文";
+      btn.title = bilingual ? "显示双语对照" : "显示译文";
       btn.setAttribute("aria-label", btn.title);
       break;
     case "error":

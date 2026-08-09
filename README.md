@@ -6,7 +6,7 @@
 
 - **Options**：实例地址、测试连接、登录绑定、退出/更换实例
 - **Side Panel**：语言选择、输入防抖自动翻译、SSE 流式译文、复制、语言互换
-- **Gmail**：阅读邮件时注入翻译按钮；点击后用 vendored [Read Frog](https://github.com/mengxi-ream/read-frog) 双语 DOM 引擎做段落交错对照（原文下紧跟译文），再点清除
+- **Gmail**：阅读邮件时注入翻译按钮；整封走 `/api/translate/email`（整封替换或双语对照 HTML），可在原文与译文间切换
 - **Background**：所有 API 在 Service Worker 中执行；凭证仅存 `chrome.storage.local`
 - **会话**：打开时校验 token；每 30 分钟自动检查，过期则清除凭证
 
@@ -36,7 +36,7 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 1. 安装后自动打开 Side Panel
 2. 在侧边栏填写 `http://localhost:8787`（或你的实例地址）→ 测试连接 → 登录
 3. 点击扩展图标打开 Side Panel，输入文本翻译
-4. 打开 Gmail 阅读邮件 → 点击邮件旁的 OpenTranslator 按钮 → 段落对照译文出现在原文下方；再点可清除
+4. 打开 Gmail 阅读邮件 → 点击邮件旁的 OpenTranslator 按钮 → 整封替换或双语对照写入正文；再点可切回原文
 
 也可通过扩展右键菜单或 `chrome://extensions` 打开 **Options** 页进行配置。
 
@@ -71,8 +71,9 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 - [ ] `.dev.vars` 的 `ORIGINS` 包含 `chrome-extension://gjmakoddcjjkfidekkkcmadihemhegfk`
 - [ ] Options 或 Side Panel 登录成功
 - [ ] Side Panel 输入英文，流式输出中文
-- [ ] Gmail 打开英文邮件 → 出现翻译按钮 → 段落下出现译文 → 再点清除
-- [ ] 富文本邮件：红字/黄底/粗体段落下译文继承样式；图文混排时译文在文字后、图片前；已是目标语的段落跳过；停止/清除正常
+- [ ] Gmail 打开英文邮件 → 出现翻译按钮 → 整封替换成功 → 可切回原文 / 再显示译文
+- [ ] Gmail 方式改为「双语对照」→ 正文出现原文+译文交错（译文带 `ot-gmail-translation`）→ 可切回原文
+- [ ] 富文本邮件：链接/图片/表格仍可用；引用与签名默认保留不译
 - [ ] 未登录时点击 Gmail 按钮有明确提示
 - [ ] token 过期后自动清除并提示重新登录
 
@@ -81,7 +82,7 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 ```
 entrypoints/
   background.ts       # API 出口、消息路由、SSE 流式 Port
-  gmail.content.ts    # Gmail 内容脚本（按钮 + 段落对照）
+  gmail.content.ts    # Gmail 内容脚本（按钮 + 整封 HTML 替换）
   options/            # 独立 Options 页（设置）
   sidepanel/          # 主翻译界面 + 内嵌设置
 assets/
@@ -93,17 +94,14 @@ hooks/
   useModels.ts        # 模型列表加载
   useExperts.ts       # 专家列表加载与校验
 lib/
-  api.ts              # ping / login / me / translate
-  gmail/              # Gmail DOM / UI / Port 客户端
-  read-frog-adapter/  # Config、translateTextForPage、样式注入
+  api.ts              # ping / login / me / translate / translateEmail
+  gmail/              # Gmail DOM / UI / 整封替换客户端
   storage.ts          # chrome.storage.local
   sse.ts              # SSE 解析
   messaging.ts        # sidepanel/options/content ↔ background 协议
-vendor/
-  read-frog/          # 双语 DOM 引擎（见 NOTICE.read-frog.md）
 types/                # 最小共享类型
 ```
 
 ## 许可证
 
-GPL-3.0 — 与 [OpenTranslator](https://github.com/opentranslator/opentranslator) 主项目保持一致。Gmail 页内对照翻译引擎来自 Read Frog（GPL-3.0），详见 [NOTICE.read-frog.md](NOTICE.read-frog.md)。
+GPL-3.0 — 与 [OpenTranslator](https://github.com/opentranslator/opentranslator) 主项目保持一致。

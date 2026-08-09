@@ -1,8 +1,4 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "wxt";
-
-const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Fixed dev extension ID: gjmakoddcjjkfidekkkcmadihemhegfk — see docs/ORIGINS.md */
 const DEV_EXTENSION_KEY =
@@ -14,11 +10,6 @@ export default defineConfig({
   vite: () => ({
     build: {
       modulePreload: false,
-    },
-    resolve: {
-      alias: {
-        "#rf": path.resolve(rootDir, "vendor/read-frog"),
-      },
     },
   }),
   manifest: {
