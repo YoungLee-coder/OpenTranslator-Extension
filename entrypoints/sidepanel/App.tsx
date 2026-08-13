@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeftRight,
   Check,
@@ -7,7 +7,6 @@ import {
   Square,
   X,
 } from "lucide-react";
-import SettingsView from "@/components/SettingsView";
 import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
 import { isModelAvailabilityError } from "@/lib/experts";
@@ -17,12 +16,27 @@ import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
 import { MAX_TRANSLATE_CHARS } from "@/types";
 
-const DEBOUNCE_MS = 500;
+const SettingsView = lazy(() => import("@/components/SettingsView"));
+
+const DEBOUNCE_MS = 280;
 
 type View = "translate" | "settings";
 
 function charCount(n: number) {
   return `${n} 字符`;
+}
+
+function newRequestId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  );
+}
+
+function isImmediateInput(event: React.ChangeEvent<HTMLTextAreaElement>): boolean {
+  const native = event.nativeEvent;
+  if (!(native instanceof InputEvent)) return false;
+  return native.inputType === "insertFromPaste" || native.inputType === "insertFromDrop";
 }
 
 export default function App() {
@@ -40,7 +54,14 @@ export default function App() {
   } | null>(null);
 
   const portRef = useRef<Browser.runtime.Port | null>(null);
+  const ensurePortRef = useRef<() => Browser.runtime.Port | null>(() => null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRequestRef = useRef<string | null>(null);
+  const accumulatedRef = useRef("");
+  const rafRef = useRef(0);
+  const queuePaintRef = useRef<() => void>(() => {});
+  const refreshRef = useRef<() => Promise<ExtensionState | null>>(async () => null);
+  const reloadModelsRef = useRef<() => Promise<unknown>>(async () => {});
 
   const refresh = useCallback(async () => {
     const local = await readExtensionState();
@@ -48,24 +69,126 @@ export default function App() {
     return local;
   }, []);
 
-  const { models, reload: reloadModels } = useModels({
+  const { reload: reloadModels } = useModels({
     enabled: state?.bound ?? false,
     userId: state?.user?.id,
     onPrefsAdjusted: refresh,
   });
 
+  refreshRef.current = refresh;
+  reloadModelsRef.current = reloadModels;
+  queuePaintRef.current = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      setTranslatedText(accumulatedRef.current);
+    });
+  };
+
+  const cancelPaint = () => {
+    if (!rafRef.current) return;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  };
+
   useEffect(() => {
+    void sendBg({ type: "warmup" });
     let cancelled = false;
     void (async () => {
       const local = await readExtensionState();
       if (cancelled) return;
       setState(local);
-      // Soft session check — does not block first paint.
       const res = await sendBg<ExtensionState>({ type: "me" });
       if (!cancelled && res.ok && res.data) setState(res.data);
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let port: Browser.runtime.Port | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const handleMessage = (msg: TranslatePortOut) => {
+      if (msg.type === "keepalive") return;
+      if ("requestId" in msg && msg.requestId && msg.requestId !== activeRequestRef.current) {
+        return;
+      }
+
+      if (msg.type === "delta") {
+        accumulatedRef.current += msg.text;
+        queuePaintRef.current();
+      } else if (msg.type === "progress") {
+        setChunkProgress({
+          chunkIndex: msg.chunkIndex,
+          chunkTotal: msg.chunkTotal,
+        });
+      } else if (msg.type === "done") {
+        cancelPaint();
+        accumulatedRef.current = msg.translatedText || accumulatedRef.current;
+        setTranslatedText(accumulatedRef.current);
+        if (msg.detectedSourceLang) {
+          setDetectedSourceLang(msg.detectedSourceLang);
+        }
+        setChunkProgress(null);
+        setTranslating(false);
+        activeRequestRef.current = null;
+      } else if (msg.type === "error") {
+        cancelPaint();
+        setError(
+          formatApiError(
+            msg.error,
+            msg.status,
+            msg.status === 429 ? "api" : undefined,
+            msg.retryAfterSeconds,
+          ),
+        );
+        setChunkProgress(null);
+        setTranslating(false);
+        activeRequestRef.current = null;
+        if (isModelAvailabilityError(msg.error, msg.status)) {
+          void reloadModelsRef.current();
+        }
+        if (msg.unauthenticated) {
+          void refreshRef.current().then((data) => {
+            if (!data?.bound) setView("settings");
+          });
+        }
+      } else if (msg.type === "aborted") {
+        setChunkProgress(null);
+        setTranslating(false);
+      }
+    };
+
+    const connect = () => {
+      if (cancelled) return null;
+      port = browser.runtime.connect({ name: "translate" });
+      portRef.current = port;
+      port.onMessage.addListener(handleMessage);
+      port.onDisconnect.addListener(() => {
+        if (portRef.current === port) portRef.current = null;
+        port = null;
+        if (activeRequestRef.current) {
+          activeRequestRef.current = null;
+          setTranslating(false);
+          setChunkProgress(null);
+        }
+        if (cancelled) return;
+        reconnectTimer = setTimeout(connect, 80);
+      });
+      return port;
+    };
+
+    ensurePortRef.current = () => portRef.current ?? connect();
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      port?.disconnect();
+      portRef.current = null;
     };
   }, []);
 
@@ -82,25 +205,37 @@ export default function App() {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
+    cancelPaint();
+    activeRequestRef.current = null;
     portRef.current?.postMessage({ type: "abort" });
-    portRef.current?.disconnect();
-    portRef.current = null;
     setTranslating(false);
   }, []);
 
   const runTranslation = useCallback(
     (text: string, sourceLang: string, targetLang: string) => {
-      stopTranslation();
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      portRef.current?.postMessage({ type: "abort" });
+
       const trimmed = text.trim();
       if (!trimmed) {
+        cancelPaint();
+        activeRequestRef.current = null;
+        accumulatedRef.current = "";
         setTranslatedText("");
         setError("");
         setDetectedSourceLang(null);
         setChunkProgress(null);
+        setTranslating(false);
         return;
       }
 
       if (trimmed.length > MAX_TRANSLATE_CHARS) {
+        cancelPaint();
+        activeRequestRef.current = null;
+        accumulatedRef.current = "";
         setTranslatedText("");
         setDetectedSourceLang(null);
         setChunkProgress(null);
@@ -109,75 +244,26 @@ export default function App() {
         return;
       }
 
+      const requestId = newRequestId();
+      activeRequestRef.current = requestId;
+      accumulatedRef.current = "";
+      cancelPaint();
       setTranslating(true);
       setError("");
       setTranslatedText("");
       setDetectedSourceLang(null);
       setChunkProgress(null);
 
-      const port = browser.runtime.connect({ name: "translate" });
-      portRef.current = port;
-      let accumulated = "";
-
-      port.onMessage.addListener((msg: TranslatePortOut) => {
-        if (msg.type === "delta") {
-          accumulated += msg.text;
-          setTranslatedText(accumulated);
-        } else if (msg.type === "progress") {
-          setChunkProgress({
-            chunkIndex: msg.chunkIndex,
-            chunkTotal: msg.chunkTotal,
-          });
-        } else if (msg.type === "done") {
-          setTranslatedText(msg.translatedText || accumulated);
-          if (msg.detectedSourceLang) {
-            setDetectedSourceLang(msg.detectedSourceLang);
-          }
-          setChunkProgress(null);
-          setTranslating(false);
-          port.disconnect();
-          portRef.current = null;
-        } else if (msg.type === "error") {
-          setError(
-            formatApiError(
-              msg.error,
-              msg.status,
-              msg.status === 429 ? "api" : undefined,
-              msg.retryAfterSeconds,
-            ),
-          );
-          setChunkProgress(null);
-          setTranslating(false);
-          port.disconnect();
-          portRef.current = null;
-          if (isModelAvailabilityError(msg.error, msg.status)) {
-            void reloadModels();
-          }
-          if (msg.unauthenticated) {
-            void refresh().then((data) => {
-              if (!data?.bound) setView("settings");
-            });
-          }
-        } else if (msg.type === "aborted") {
-          setChunkProgress(null);
-          setTranslating(false);
-          portRef.current = null;
-        }
-      });
-
-      port.onDisconnect.addListener(() => {
-        setTranslating(false);
-        portRef.current = null;
-      });
-
-      port.postMessage({
+      const port = ensurePortRef.current();
+      port?.postMessage({
         type: "start",
+        requestId,
         text: trimmed,
         sourceLang,
         targetLang,
       });
     },
-    [stopTranslation, refresh, reloadModels],
+    [],
   );
 
   const scheduleTranslation = useCallback(
@@ -195,8 +281,14 @@ export default function App() {
     return () => stopTranslation();
   }, [stopTranslation]);
 
-  const handleSourceChange = (value: string) => {
+  const handleSourceChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
     setSourceText(value);
+    if (!state?.bound) return;
+    if (isImmediateInput(event)) {
+      runTranslation(value, state.sourceLang, state.targetLang);
+      return;
+    }
     scheduleTranslation(value);
   };
 
@@ -281,19 +373,21 @@ export default function App() {
   if (view === "settings" || !state.bound) {
     return (
       <div className="sidepanel">
-        <SettingsView
-          variant="sidepanel"
-          onBack={state.bound ? () => setView("translate") : undefined}
-          onStateChange={handleStateChange}
-          onLoginSuccess={handleLoginSuccess}
-        />
+        <Suspense fallback={<div className="sidepanel" />}>
+          <SettingsView
+            variant="sidepanel"
+            onBack={state.bound ? () => setView("translate") : undefined}
+            onStateChange={handleStateChange}
+            onLoginSuccess={handleLoginSuccess}
+          />
+        </Suspense>
       </div>
     );
   }
 
   const sourceLangs = LANGUAGES;
   const targetLangs = LANGUAGES.filter((l) => l.code !== "auto");
-  const canTranslate = sourceText.trim().length > 0 && !translating && models.length > 0;
+  const canTranslate = sourceText.trim().length > 0 && !translating;
 
   return (
     <div className="sidepanel animate-rise">
@@ -349,7 +443,7 @@ export default function App() {
             <textarea
               placeholder="输入或粘贴文本，将自动翻译…"
               value={sourceText}
-              onChange={(e) => handleSourceChange(e.target.value)}
+              onChange={handleSourceChange}
               onKeyDown={handleKeyDown}
               disabled={translating}
               autoFocus
@@ -443,14 +537,8 @@ export default function App() {
             <div className="target-content" aria-live="polite" aria-label="译文">
               {error ? (
                 <span className="target-error" role="alert">{error}</span>
-              ) : translatedText ? (
-                <span className="animate-fade-in">{translatedText}</span>
-              ) : translating ? (
-                <span className="target-placeholder">
-                  {chunkProgress
-                    ? `正在翻译第 ${chunkProgress.chunkIndex + 1} / ${chunkProgress.chunkTotal} 段…`
-                    : "正在翻译…"}
-                </span>
+              ) : translating || translatedText ? (
+                <span className={translating ? undefined : "animate-fade-in"}>{translatedText}</span>
               ) : (
                 <span className="target-placeholder">译文将显示在这里</span>
               )}

@@ -1,6 +1,7 @@
 import { formatApiError } from "@/lib/errors";
 import { sendBg } from "@/lib/messaging";
-import type { ExtensionState, TranslateEmailResult } from "@/lib/messaging";
+import type { TranslateEmailResult } from "@/lib/messaging";
+import { readExtensionState } from "@/lib/state";
 import type { TranslateEmailDisplay } from "@/types";
 import { MAX_EMAIL_HTML_CHARS } from "@/types";
 
@@ -8,10 +9,9 @@ export type TranslateOneResult =
   | { ok: true; text: string }
   | { ok: false; error: string; unauthenticated?: boolean };
 
-export async function loadExtensionState(): Promise<ExtensionState | null> {
-  const res = await sendBg<ExtensionState>({ type: "getState" });
-  if (!res.ok || !res.data) return null;
-  return res.data;
+/** Local storage only — avoids waking the service worker. */
+export function loadExtensionState() {
+  return readExtensionState();
 }
 
 /** Whole-email HTML via one-shot background message (not Port — email SSE is silent until done). */

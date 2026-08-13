@@ -2,17 +2,14 @@ import {
   type EmailProvider,
   OT_BTN_ATTR,
   isComposeOrEditable,
-  isVisible,
   pathAndHashRouteKey,
   stampMessageKey,
 } from "@/lib/email/dom";
 
-const MESSAGE_BODY_SELECTORS = ["div.a3s.aiL", "div.a3s", "div[data-message-id] div.a3s"];
-
+/** Open conversation bodies — scoped so we never scan the whole inbox list. */
+const OPEN_BODY_SELECTOR = "div.adn.ads div.a3s, div.h7 div.a3s, div[data-message-id] div.a3s";
 const MESSAGE_ROOT_SELECTORS = ["div.adn.ads", "div.gs", "div[data-message-id]", "div.ii.gt"];
-
 const TOOLBAR_SELECTORS = ["div.gH", "div.ade", "div.hz.gt", "td.gH.acX"];
-
 const LAYOUT_STYLE_ID = "ot-email-gmail-layout-fix";
 
 function findMessageRoot(body: HTMLElement): HTMLElement {
@@ -30,16 +27,13 @@ export const gmailProvider: EmailProvider = {
     const bodies: HTMLElement[] = [];
     const seen = new Set<HTMLElement>();
 
-    for (const sel of MESSAGE_BODY_SELECTORS) {
-      for (const node of document.querySelectorAll(sel)) {
-        if (!(node instanceof HTMLElement)) continue;
-        if (!isVisible(node)) continue;
-        if (isComposeOrEditable(node)) continue;
-        if (node.closest(".Am")) continue;
-        if (seen.has(node)) continue;
-        seen.add(node);
-        bodies.push(node);
-      }
+    for (const node of document.querySelectorAll(OPEN_BODY_SELECTOR)) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (seen.has(node)) continue;
+      if (node.closest(".Am")) continue;
+      if (isComposeOrEditable(node)) continue;
+      seen.add(node);
+      bodies.push(node);
     }
 
     return bodies;

@@ -193,6 +193,7 @@ export async function* streamTranslate(
       },
       body: JSON.stringify({ ...req, stream: true }),
       signal,
+      priority: "high",
     });
   } catch (err) {
     throw wrapFetchError(err);
@@ -236,6 +237,7 @@ export async function* streamTranslateEmail(
         display: req.display === "bilingual" ? "bilingual" : "replace",
       }),
       signal,
+      priority: "high",
     });
   } catch (err) {
     throw wrapFetchError(err);

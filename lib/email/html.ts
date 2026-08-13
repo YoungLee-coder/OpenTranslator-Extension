@@ -2,7 +2,7 @@
 
 import { OT_REPLACED_ATTR } from "@/lib/email/dom";
 
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "META", "LINK", "IFRAME", "OBJECT", "EMBED"]);
+const SKIP_SELECTOR = "script,style,noscript,meta,link,iframe,object,embed";
 
 /** Quoted thread history — safe to drop before API (user can still view full mail via「原文」). */
 const QUOTE_SELECTORS = [
@@ -19,18 +19,26 @@ const QUOTE_SELECTORS = [
 
 const EXTENSION_CHROME_SELECTORS = `[${OT_REPLACED_ATTR}], .ot-email-translation, [data-ot-gmail-replaced], .ot-gmail-translation`;
 
+/** Candidates only — avoids walking every node in a large email. */
+const HIDDEN_CANDIDATE_SELECTOR = [
+  "[hidden]",
+  "[style*='display']",
+  "[style*='visibility']",
+  "[style*='opacity']",
+  "img[width='1']",
+  "img[height='1']",
+  "img[width='0']",
+  "img[height='0']",
+].join(",");
+
 /**
  * Clone message HTML for the email API: drop dangerous tags, quoted threads, and
  * hidden tracking nodes. Keeps the latest reply body + layout + images.
  */
 export function prepareEmailHtml(body: HTMLElement): { html: string; plainLength: number } {
   const clone = body.cloneNode(true) as HTMLElement;
-  for (const el of clone.querySelectorAll([...SKIP_TAGS].join(","))) {
-    el.remove();
-  }
-  for (const el of clone.querySelectorAll(EXTENSION_CHROME_SELECTORS)) {
-    el.remove();
-  }
+  clone.querySelectorAll(SKIP_SELECTOR).forEach((el) => el.remove());
+  clone.querySelectorAll(EXTENSION_CHROME_SELECTORS).forEach((el) => el.remove());
   removeHtmlComments(clone);
   removeHiddenAndTrackingNodes(clone);
   removeQuotedThreadContent(clone);
@@ -58,14 +66,10 @@ function removeHtmlComments(root: HTMLElement): void {
 
 function removeHiddenAndTrackingNodes(root: HTMLElement): void {
   const toRemove: Element[] = [];
-  for (const el of root.querySelectorAll("*")) {
-    if (isHiddenOrTrackingNode(el)) {
-      toRemove.push(el);
-    }
+  for (const el of root.querySelectorAll(HIDDEN_CANDIDATE_SELECTOR)) {
+    if (isHiddenOrTrackingNode(el)) toRemove.push(el);
   }
-  for (const el of toRemove) {
-    el.remove();
-  }
+  for (const el of toRemove) el.remove();
 }
 
 function isHiddenOrTrackingNode(el: Element): boolean {

@@ -1,5 +1,5 @@
 import { loadExtensionState } from "@/lib/email/client";
-import { OT_BTN_ATTR, OT_REPLACED_ATTR, type EmailProvider } from "@/lib/email/dom";
+import { OT_BTN_ATTR, OT_HOST_ATTR, OT_REPLACED_ATTR, type EmailProvider } from "@/lib/email/dom";
 import {
   clearReplaceCache,
   getReplaceCache,
@@ -7,6 +7,7 @@ import {
   showOriginalFromCache,
   showTranslatedFromCache,
 } from "@/lib/email/replace";
+import { sendBg } from "@/lib/messaging";
 import { getPrefs, resolveEmailTranslateMode } from "@/lib/storage";
 import {
   createTranslateButton,
@@ -24,6 +25,66 @@ type Session = {
   body: HTMLElement;
   btn: HTMLButtonElement | null;
 };
+
+const SCAN_DEBOUNCE_MS = 80;
+const ROUTE_FALLBACK_MS = 2500;
+
+function isOwnNode(node: Node): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  return (
+    node.hasAttribute(OT_BTN_ATTR) ||
+    node.hasAttribute(OT_HOST_ATTR) ||
+    node.id === "ot-email-gmail-layout-fix" ||
+    node.classList.contains("ot-email-toast")
+  );
+}
+
+function isRelevantNode(node: Node): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  if (isOwnNode(node)) return false;
+  const cls = node.className;
+  if (typeof cls === "string" && /(?:^|\s)(?:a3s|adn|ads|gs|ii)(?:\s|$)/.test(cls)) {
+    return true;
+  }
+  if (node.hasAttribute("data-message-id") || node.getAttribute("role") === "listitem") {
+    return true;
+  }
+  if (node.tagName === "DIV" && node.querySelector("div.a3s, div.adn, [data-message-id]")) {
+    return true;
+  }
+  return false;
+}
+
+function mutationsLookRelevant(mutations: MutationRecord[]): boolean {
+  for (const mutation of mutations) {
+    if (isOwnNode(mutation.target)) continue;
+    for (const node of mutation.addedNodes) {
+      if (isRelevantNode(node)) return true;
+    }
+    for (const node of mutation.removedNodes) {
+      if (isRelevantNode(node)) return true;
+    }
+  }
+  return false;
+}
+
+function patchHistory(onNav: () => void): () => void {
+  const wrap = (fn: History["pushState"]): History["pushState"] =>
+    function (this: History, ...args: Parameters<History["pushState"]>) {
+      const ret = fn.apply(this, args);
+      onNav();
+      return ret;
+    };
+
+  const origPush = history.pushState.bind(history);
+  const origReplace = history.replaceState.bind(history);
+  history.pushState = wrap(origPush);
+  history.replaceState = wrap(origReplace);
+  return () => {
+    history.pushState = origPush;
+    history.replaceState = origReplace;
+  };
+}
 
 /** Shared Gmail in-page email translate runtime. */
 export function startEmailTranslateRuntime(provider: EmailProvider): void {
@@ -205,17 +266,11 @@ export function startEmailTranslateRuntime(provider: EmailProvider): void {
     }
   }
 
-  async function handleButtonClick(btn: HTMLButtonElement, body: HTMLElement): Promise<void> {
+  function handleButtonClick(btn: HTMLButtonElement, body: HTMLElement): void {
     const messageKey = provider.getOrCreateMessageKey(body);
     getSession(messageKey, body).btn = btn;
-
-    // Prefer live prefs so a settings change applies without reload.
-    const prefs = await getPrefs();
-    const mode = resolveEmailTranslateMode(prefs.emailTranslateMode);
-    emailTranslateMode = mode;
-
     const live = resolveLiveBody(messageKey, body) ?? body;
-    await runEmailTranslate(btn, messageKey, live, mode);
+    void runEmailTranslate(btn, messageKey, live, emailTranslateMode);
   }
 
   function ensureButtonForBody(body: HTMLElement): void {
@@ -257,7 +312,7 @@ export function startEmailTranslateRuntime(provider: EmailProvider): void {
       e.preventDefault();
       e.stopPropagation();
       const live = resolveLiveBody(messageKey, body) ?? body;
-      void handleButtonClick(btn, live);
+      handleButtonClick(btn, live);
     });
   }
 
@@ -333,21 +388,45 @@ export function startEmailTranslateRuntime(provider: EmailProvider): void {
     );
   }
 
-  let scheduled = false;
-  const scheduleScan = () => {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
+  let scanTimer: ReturnType<typeof setTimeout> | null = null;
+  let scanRaf = 0;
+
+  const scheduleScan = (immediate = false) => {
+    const run = () => {
+      scanTimer = null;
+      scanRaf = 0;
       scanAndInject();
-    });
+    };
+    if (immediate) {
+      if (scanTimer) {
+        clearTimeout(scanTimer);
+        scanTimer = null;
+      }
+      if (scanRaf) return;
+      scanRaf = requestAnimationFrame(run);
+      return;
+    }
+    if (scanTimer || scanRaf) return;
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      scanRaf = requestAnimationFrame(run);
+    }, SCAN_DEBOUNCE_MS);
   };
 
-  const observer = new MutationObserver(() => scheduleScan());
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
+  const observer = new MutationObserver((mutations) => {
+    if (!mutationsLookRelevant(mutations)) return;
+    scheduleScan();
   });
+
+  let observedRoot: Element | null = null;
+  const observeAppRoot = () => {
+    const root =
+      document.querySelector("div[role='main']") ?? document.body ?? document.documentElement;
+    if (!root || root === observedRoot) return;
+    observer.disconnect();
+    observedRoot = root;
+    observer.observe(root, { childList: true, subtree: true });
+  };
 
   // Only abort on real route changes (hash/path). Query-string churn is ignored.
   let lastRoute = provider.routeKey();
@@ -356,11 +435,14 @@ export function startEmailTranslateRuntime(provider: EmailProvider): void {
     if (next === lastRoute) return;
     lastRoute = next;
     abortAllRunning();
-    scheduleScan();
+    observeAppRoot();
+    scheduleScan(true);
   };
+
   window.addEventListener("popstate", checkNav);
   window.addEventListener("hashchange", checkNav);
-  window.setInterval(checkNav, 800);
+  patchHistory(checkNav);
+  window.setInterval(checkNav, ROUTE_FALLBACK_MS);
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes.prefs) return;
@@ -382,5 +464,7 @@ export function startEmailTranslateRuntime(provider: EmailProvider): void {
     );
   });
 
-  void syncEmailPrefsFromStorage().then(() => scheduleScan());
+  observeAppRoot();
+  void sendBg({ type: "warmup" });
+  void syncEmailPrefsFromStorage().then(() => scheduleScan(true));
 }

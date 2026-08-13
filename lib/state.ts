@@ -1,10 +1,9 @@
 import type { ExtensionState } from "@/lib/messaging";
-import { getAuth, getPrefs, resolveEmailTranslateMode } from "@/lib/storage";
+import { getAuthAndPrefs, resolveEmailTranslateMode } from "@/lib/storage";
 
 /** Read extension state from local storage only — no network. */
 export async function readExtensionState(): Promise<ExtensionState> {
-  const auth = await getAuth();
-  const prefs = await getPrefs();
+  const { auth, prefs } = await getAuthAndPrefs();
   const emailEnabled = prefs.emailEnabled !== false;
   const emailTranslateMode = resolveEmailTranslateMode(prefs.emailTranslateMode);
   if (!auth) {

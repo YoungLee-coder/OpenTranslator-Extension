@@ -81,20 +81,24 @@ jobs:
           echo "Wrote release notes:"
           cat release-notes.md
 
+      - name: Setup pnpm
+        if: steps.version.outputs.changed == 'true'
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         if: steps.version.outputs.changed == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
         if: steps.version.outputs.changed == 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build zip
         if: steps.version.outputs.changed == 'true'
-        run: npm run zip
+        run: pnpm zip
 
       - name: Create GitHub Release
         if: steps.version.outputs.changed == 'true'

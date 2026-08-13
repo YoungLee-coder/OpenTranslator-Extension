@@ -4,6 +4,7 @@ import { gmailProvider } from "@/lib/email/providers/gmail";
 
 export default defineContentScript({
   matches: ["https://mail.google.com/*"],
+  runAt: "document_idle",
   main() {
     startEmailTranslateRuntime(gmailProvider);
   },

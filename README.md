@@ -1,6 +1,6 @@
 # OpenTranslator Chrome 扩展
 
-使用自托管 [OpenTranslator](https://github.com/opentranslator/opentranslator) 实例进行 Side Panel 翻译。仅支持私站模式：必须配置实例地址并登录。
+[OpenTranslator](https://github.com/opentranslator/opentranslator) 的 Chrome 插件。
 
 ## 功能
 
@@ -13,8 +13,8 @@
 ## 快速开始
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 在 Chrome 打开 `chrome://extensions` → 开发者模式 → 加载 `.output/chrome-mv3-dev`。
@@ -42,22 +42,30 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 
 ## 开发命令
 
-| 命令 | 说明 |
-|------|------|
-| `npm run dev` | 开发模式（HMR） |
-| `npm run build` | 生产构建 → `.output/chrome-mv3` |
-| `npm run compile` | TypeScript 检查 |
-| `npm run zip` | 打包为 zip |
+
+| 命令             | 说明                          |
+| -------------- | --------------------------- |
+| `pnpm dev`     | 开发模式（HMR）                   |
+| `pnpm build`   | 生产构建 → `.output/chrome-mv3` |
+| `pnpm compile` | TypeScript 检查               |
+| `pnpm zip`     | 打包为 zip                     |
+
+
+
 
 ## 权限
 
-| 权限 | 用途 |
-|------|------|
-| `storage` | 实例地址、token、语言偏好 |
-| `alarms` | 定期校验登录会话 |
-| `sidePanel` | 侧边栏翻译界面 |
-| `host_permissions` | 开发环境 `localhost:8787`；Gmail `mail.google.com`（内容脚本） |
-| `optional_host_permissions` | 用户实例地址（登录时动态申请） |
+
+| 权限                          | 用途                                                  |
+| --------------------------- | --------------------------------------------------- |
+| `storage`                   | 实例地址、token、语言偏好                                     |
+| `alarms`                    | 定期校验登录会话                                            |
+| `sidePanel`                 | 侧边栏翻译界面                                             |
+| `host_permissions`          | 开发环境 `localhost:8787`；Gmail `mail.google.com`（内容脚本） |
+| `optional_host_permissions` | 用户实例地址（登录时动态申请）                                     |
+
+
+
 
 ## 安全说明
 
@@ -65,17 +73,7 @@ ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegf
 - 凭证只存在本机 `chrome.storage.local`，不同步云端；Gmail 页不持有 token
 - 开源协议与主项目一致：[GPL-3.0](LICENSE)
 
-## 联调 Checklist
 
-- [ ] 主仓库 `pnpm dev` 运行在 `http://localhost:8787`
-- [ ] `.dev.vars` 的 `ORIGINS` 包含 `chrome-extension://gjmakoddcjjkfidekkkcmadihemhegfk`
-- [ ] Options 或 Side Panel 登录成功
-- [ ] Side Panel 输入英文，流式输出中文
-- [ ] Gmail 打开英文邮件 → 出现翻译按钮 → 整封替换成功 → 可切回原文 / 再显示译文
-- [ ] Email 方式改为「双语对照」→ 正文出现原文+译文交错（译文带 `ot-email-translation` / `ot-gmail-translation`）→ 可切回原文
-- [ ] 富文本邮件：链接/图片/表格仍可用；引用与签名默认保留不译
-- [ ] 未登录时点击 Email 按钮有明确提示
-- [ ] token 过期后自动清除并提示重新登录
 
 ## 架构
 
@@ -101,6 +99,8 @@ lib/
   messaging.ts        # sidepanel/options/content ↔ background 协议
 types/                # 最小共享类型
 ```
+
+
 
 ## 许可证
 

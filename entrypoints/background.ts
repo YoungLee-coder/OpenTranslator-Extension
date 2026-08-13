@@ -1,10 +1,11 @@
 import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate, streamTranslateEmail } from "@/lib/api";
+import { createDeltaBatcher } from "@/lib/delta-batch";
 import { resolveExpertId } from "@/lib/experts";
 import { decodeModelKey, resolveEmailTranslateModel } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslatePortOut } from "@/lib/messaging";
 import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
-import { clearAuth, getAuth, getPrefs, setAuth, setPrefs } from "@/lib/storage";
+import { clearAuth, getAuth, getAuthAndPrefs, setAuth, setPrefs } from "@/lib/storage";
 import type { AiExpertsPublicResponse, ExtensionAuth, TranslateModelsResponse } from "@/types";
 import { normalizeBaseUrl } from "@/lib/url";
 
@@ -19,6 +20,8 @@ type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
 
 let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
 let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
+let modelsInflight: { userId: string; promise: Promise<TranslateModelsResponse> } | null = null;
+let expertsInflight: { userId: string; promise: Promise<AiExpertsPublicResponse> } | null = null;
 /** Last successful /api/auth/me (or login) for the bound user. */
 let sessionVerified: { userId: string; at: number } | null = null;
 
@@ -57,9 +60,17 @@ function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null 
 async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsResponse> {
   const cached = cacheFresh(modelsCache, auth.user.id);
   if (cached) return cached;
-  const data = await fetchModels(auth.baseUrl, auth.token);
-  modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
-  return data;
+  if (modelsInflight?.userId === auth.user.id) return modelsInflight.promise;
+  const promise = fetchModels(auth.baseUrl, auth.token)
+    .then((data) => {
+      modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      if (modelsInflight?.promise === promise) modelsInflight = null;
+    });
+  modelsInflight = { userId: auth.user.id, promise };
+  return promise;
 }
 
 /** Warm models catalog without blocking the caller. */
@@ -194,9 +205,19 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         }
         const cached = cacheFresh(expertsCache, auth.user.id);
         if (cached) return { ok: true, data: cached };
-        const data = await fetchExperts(auth.baseUrl, auth.token);
-        expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
-        return { ok: true, data };
+        if (expertsInflight?.userId === auth.user.id) {
+          return { ok: true, data: await expertsInflight.promise };
+        }
+        const promise = fetchExperts(auth.baseUrl, auth.token)
+          .then((data) => {
+            expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+            return data;
+          })
+          .finally(() => {
+            if (expertsInflight?.promise === promise) expertsInflight = null;
+          });
+        expertsInflight = { userId: auth.user.id, promise };
+        return { ok: true, data: await promise };
       }
       case "setPrefs": {
         await setPrefs({
@@ -216,17 +237,14 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         return { ok: true };
       }
       case "translateEmail": {
-        const auth = await getAuth();
+        const { auth, prefs } = await getAuthAndPrefs();
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
 
-        const session = await ensureSession(auth);
-        if (!session.ok) {
-          return fail("登录已过期，请重新登录", session.status);
-        }
+        // Don't block on /api/auth/me — 401 from translateEmail still clears auth.
+        void ensureSession(auth);
 
-        const prefs = await getPrefs();
         let preferred: { providerId: string; model: string } | undefined;
         if (prefs.modelKey) {
           try {
@@ -321,6 +339,9 @@ export default defineBackground(() => {
     void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   }
 
+  void getAuthAndPrefs().then(({ auth }) => {
+    if (auth) prefetchModelsCatalog(auth);
+  });
   void verifyBound();
   void browser.alarms.create(SESSION_ALARM, {
     periodInMinutes: SESSION_CHECK_MINUTES,
@@ -387,14 +408,21 @@ export default defineBackground(() => {
 
       abortController?.abort();
       abortController = new AbortController();
-      const signal = abortController.signal;
+      const thisAbort = abortController;
+      const signal = thisAbort.signal;
+      const requestId = msg.requestId;
       startKeepAlive();
 
-      const auth = await getAuth();
+      const deltas = createDeltaBatcher((text) => {
+        post({ type: "delta", requestId, text });
+      });
+
+      const { auth, prefs } = await getAuthAndPrefs();
       if (!auth) {
         stopKeepAlive();
         post({
           type: "error",
+          requestId,
           error: "请先登录你的 OpenTranslator 实例",
           unauthenticated: true,
         });
@@ -402,19 +430,10 @@ export default defineBackground(() => {
       }
 
       try {
-        const session = await ensureSession(auth);
-        if (!session.ok) {
-          stopKeepAlive();
-          post({
-            type: "error",
-            error: "登录已过期，请重新登录",
-            status: session.status,
-            unauthenticated: true,
-          });
-          return;
-        }
+        // Token expiry is handled by 401 on the translate request itself.
+        // A blocking /api/auth/me here adds a full RTT after every SW restart.
+        void ensureSession(auth);
 
-        const prefs = await getPrefs();
         let providerId: string | undefined;
         let model: string | undefined;
         if (prefs.modelKey) {
@@ -441,40 +460,48 @@ export default defineBackground(() => {
           signal,
         )) {
           if (signal.aborted || disconnected) {
-            post({ type: "aborted" });
+            deltas.drain();
+            post({ type: "aborted", requestId });
             return;
           }
           if (event.type === "delta") {
             translated += event.text;
-            post({ type: "delta", text: event.text });
+            deltas.push(event.text);
           } else if (event.type === "progress") {
+            deltas.drain();
             post({
               type: "progress",
+              requestId,
               chunkIndex: event.chunkIndex,
               chunkTotal: event.chunkTotal,
             });
           } else if (event.type === "done") {
             sawTerminal = true;
+            deltas.drain();
             post({
               type: "done",
+              requestId,
               translatedText: event.translatedText || translated,
               detectedSourceLang: event.detectedSourceLang,
             });
           } else if (event.type === "error") {
             sawTerminal = true;
-            post({ type: "error", error: event.error });
+            deltas.drain();
+            post({ type: "error", requestId, error: event.error });
           }
         }
         if (!sawTerminal && !signal.aborted && !disconnected) {
+          deltas.drain();
           if (translated.trim()) {
-            post({ type: "done", translatedText: translated });
+            post({ type: "done", requestId, translatedText: translated });
           } else {
-            post({ type: "error", error: "翻译未完成，请重试" });
+            post({ type: "error", requestId, error: "翻译未完成，请重试" });
           }
         }
       } catch (err) {
+        deltas.drain();
         if (signal.aborted || disconnected) {
-          post({ type: "aborted" });
+          post({ type: "aborted", requestId });
           return;
         }
         if (err instanceof ApiError) {
@@ -483,6 +510,7 @@ export default defineBackground(() => {
             clearAuthCaches();
             post({
               type: "error",
+              requestId,
               error: "登录已过期，请重新登录",
               status: err.status,
               unauthenticated: true,
@@ -491,6 +519,7 @@ export default defineBackground(() => {
           }
           post({
             type: "error",
+            requestId,
             error: err.message,
             status: err.status,
             retryAfterSeconds: err.retryAfterSeconds,
@@ -499,10 +528,11 @@ export default defineBackground(() => {
         }
         post({
           type: "error",
+          requestId,
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        stopKeepAlive();
+        if (abortController === thisAbort) stopKeepAlive();
       }
     });
 

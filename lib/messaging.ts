@@ -59,6 +59,7 @@ export type { AiExpertsPublicResponse, TranslateModelsResponse };
 export type TranslatePortIn =
   | {
       type: "start";
+      requestId: string;
       text: string;
       sourceLang: string;
       targetLang: string;
@@ -66,18 +67,24 @@ export type TranslatePortIn =
   | { type: "abort" };
 
 export type TranslatePortOut =
-  | { type: "delta"; text: string }
-  | { type: "progress"; chunkIndex: number; chunkTotal: number }
+  | { type: "delta"; requestId: string; text: string }
+  | { type: "progress"; requestId: string; chunkIndex: number; chunkTotal: number }
   | { type: "keepalive" }
-  | { type: "done"; translatedText: string; detectedSourceLang?: string }
+  | {
+      type: "done";
+      requestId: string;
+      translatedText: string;
+      detectedSourceLang?: string;
+    }
   | {
       type: "error";
+      requestId?: string;
       error: string;
       status?: number;
       unauthenticated?: boolean;
       retryAfterSeconds?: number;
     }
-  | { type: "aborted" };
+  | { type: "aborted"; requestId?: string };
 
 export type TranslateEmailResult = {
   translatedText: string;
