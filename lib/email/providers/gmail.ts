@@ -2,6 +2,7 @@ import {
   type EmailProvider,
   OT_BTN_ATTR,
   isComposeOrEditable,
+  isVisible,
   pathAndHashRouteKey,
   stampMessageKey,
 } from "@/lib/email/dom";
@@ -30,8 +31,11 @@ export const gmailProvider: EmailProvider = {
     for (const node of document.querySelectorAll(OPEN_BODY_SELECTOR)) {
       if (!(node instanceof HTMLElement)) continue;
       if (seen.has(node)) continue;
-      if (node.closest(".Am")) continue;
+      if (node.closest(".Am, .gmail_quote, .gmail_extra")) continue;
+      if (node.closest("div.ii.gt.adO")) continue;
+      if (node.parentElement?.closest("div.a3s")) continue;
       if (isComposeOrEditable(node)) continue;
+      if (!isVisible(node)) continue;
       seen.add(node);
       bodies.push(node);
     }

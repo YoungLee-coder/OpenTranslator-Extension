@@ -1,6 +1,7 @@
 /** Light sanitize / apply helpers for whole-email HTML translation. */
 
 import { OT_REPLACED_ATTR } from "@/lib/email/dom";
+import { pickEmailPayload } from "@/lib/email/visible-text";
 
 const SKIP_SELECTOR = "script,style,noscript,meta,link,iframe,object,embed";
 
@@ -41,10 +42,16 @@ export function prepareEmailHtml(body: HTMLElement): { html: string; plainLength
   clone.querySelectorAll(EXTENSION_CHROME_SELECTORS).forEach((el) => el.remove());
   removeHtmlComments(clone);
   removeHiddenAndTrackingNodes(clone);
+
+  const withQuotes = {
+    html: clone.innerHTML.trim(),
+    text: clone.textContent ?? "",
+  };
   removeQuotedThreadContent(clone);
-  const html = clone.innerHTML.trim();
-  const plainLength = (clone.textContent ?? "").replace(/\s+/g, " ").trim().length;
-  return { html, plainLength };
+  return pickEmailPayload(
+    { html: clone.innerHTML.trim(), text: clone.textContent ?? "" },
+    withQuotes,
+  );
 }
 
 /** Remove Gmail / Outlook / Apple Mail quote blocks nested in thread replies. */

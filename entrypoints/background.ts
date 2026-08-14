@@ -7,6 +7,7 @@ import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getAuthAndPrefs, setAuth, setPrefs } from "@/lib/storage";
 import type { AiExpertsPublicResponse, ExtensionAuth, TranslateModelsResponse } from "@/types";
+import { emptyEmailStreamError } from "@/lib/email/visible-text";
 import { normalizeBaseUrl } from "@/lib/url";
 
 const SESSION_ALARM = "session-check";
@@ -271,6 +272,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         try {
           let translated = "";
           let detectedSourceLang: string | undefined;
+          let sawTerminal = false;
           for await (const event of streamTranslateEmail(
             auth.baseUrl,
             auth.token,
@@ -289,18 +291,20 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
               return fail("已取消");
             }
             if (event.type === "delta") {
-              translated += event.text;
+              if (typeof event.text === "string") translated += event.text;
             } else if (event.type === "done") {
+              sawTerminal = true;
               translated = event.translatedText || translated;
               detectedSourceLang = event.detectedSourceLang;
             } else if (event.type === "error") {
+              sawTerminal = true;
               return fail(event.error);
             }
           }
 
           const text = translated.trim();
           if (!text) {
-            return fail("译文为空");
+            return fail(emptyEmailStreamError(translated, sawTerminal));
           }
           return {
             ok: true,
