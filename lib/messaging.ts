@@ -91,6 +91,55 @@ export type TranslateEmailResult = {
   detectedSourceLang?: string;
 };
 
-export function sendBg<T = unknown>(request: BgRequest): Promise<BgResponse & { data?: T }> {
-  return browser.runtime.sendMessage(request);
+const BG_RETRY_DELAYS_MS = [0, 80, 200, 500] as const;
+
+const DISCONNECT_ERROR_RE =
+  /Receiving end does not exist|Could not establish connection|Extension context invalidated|message port closed before a response was received/i;
+
+function disconnectMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function isDisconnectError(err: unknown): boolean {
+  return DISCONNECT_ERROR_RE.test(disconnectMessage(err));
+}
+
+/** Must be read in Port.onDisconnect or Chrome logs Unchecked runtime.lastError. */
+export function consumeRuntimeLastError(): string {
+  return browser.runtime.lastError?.message ?? "";
+}
+
+/**
+ * Message the service worker, retrying the MV3 wakeup race.
+ * Persistent disconnects resolve as `{ ok: false }` so callers do not need a catch.
+ */
+export async function sendBg<T = unknown>(
+  request: BgRequest,
+): Promise<BgResponse & { data?: T }> {
+  let lastErr: unknown;
+  for (let i = 0; i < BG_RETRY_DELAYS_MS.length; i++) {
+    const delay = BG_RETRY_DELAYS_MS[i];
+    if (delay) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    try {
+      return await browser.runtime.sendMessage(request);
+    } catch (err) {
+      lastErr = err;
+      if (!isDisconnectError(err)) throw err;
+    }
+  }
+  const message = disconnectMessage(lastErr);
+  if (/Extension context invalidated/i.test(message)) {
+    return {
+      ok: false,
+      error: "扩展已更新，请关闭侧栏后再打开",
+      kind: "disconnected",
+    };
+  }
+  return {
+    ok: false,
+    error: "扩展后台未就绪，请稍后重试",
+    kind: "disconnected",
+  };
 }

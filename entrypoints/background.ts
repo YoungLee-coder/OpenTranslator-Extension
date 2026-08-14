@@ -334,36 +334,21 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
   }
 }
 
+function isTrustedExtensionSender(sender?: { id?: string }): boolean {
+  // onConnect / onMessage are same-extension only (externally_connectable is unset).
+  // Some Chrome builds omit sender.id on side-panel ports.
+  if (!sender?.id) return true;
+  return sender.id === browser.runtime.id;
+}
+
 export default defineBackground(() => {
-  if (browser.sidePanel) {
-    void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  }
-
-  void getAuthAndPrefs().then(({ auth }) => {
-    if (auth) prefetchModelsCatalog(auth);
-  });
-  void verifyBound();
-  void browser.alarms.create(SESSION_ALARM, {
-    periodInMinutes: SESSION_CHECK_MINUTES,
-  });
-
-  browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SESSION_ALARM) {
-      void verifyBound();
-    }
-  });
-
-  browser.runtime.onStartup.addListener(() => {
-    void verifyBound();
-  });
-
   browser.runtime.onMessage.addListener((request: BgRequest, sender) => {
-    if (sender.id !== browser.runtime.id) return;
+    if (!isTrustedExtensionSender(sender)) return;
     return handleMessage(request);
   });
 
   browser.runtime.onConnect.addListener((port) => {
-    if (port.sender?.id !== browser.runtime.id) {
+    if (!isTrustedExtensionSender(port.sender)) {
       port.disconnect();
       return;
     }
@@ -541,5 +526,29 @@ export default defineBackground(() => {
       stopKeepAlive();
       abortController?.abort();
     });
+  });
+
+  if (browser.sidePanel) {
+    void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  }
+
+  void getAuthAndPrefs()
+    .then(({ auth }) => {
+      if (auth) prefetchModelsCatalog(auth);
+    })
+    .catch(() => {});
+  void verifyBound().catch(() => {});
+  void browser.alarms.create(SESSION_ALARM, {
+    periodInMinutes: SESSION_CHECK_MINUTES,
+  });
+
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === SESSION_ALARM) {
+      void verifyBound();
+    }
+  });
+
+  browser.runtime.onStartup.addListener(() => {
+    void verifyBound();
   });
 });

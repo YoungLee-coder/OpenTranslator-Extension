@@ -11,7 +11,7 @@ import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
 import { isModelAvailabilityError } from "@/lib/experts";
 import { LANGUAGES, languageLabel } from "@/lib/languages";
-import { sendBg } from "@/lib/messaging";
+import { consumeRuntimeLastError, sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
 import { MAX_TRANSLATE_CHARS } from "@/types";
@@ -110,8 +110,10 @@ export default function App() {
     let cancelled = false;
     let port: Browser.runtime.Port | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempt = 0;
 
     const handleMessage = (msg: TranslatePortOut) => {
+      reconnectAttempt = 0;
       if (msg.type === "keepalive") return;
       if ("requestId" in msg && msg.requestId && msg.requestId !== activeRequestRef.current) {
         return;
@@ -162,27 +164,57 @@ export default function App() {
       }
     };
 
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      const delay = Math.min(100 * 2 ** reconnectAttempt, 2000);
+      reconnectAttempt += 1;
+      reconnectTimer = setTimeout(() => {
+        wakeThenConnect();
+      }, delay);
+    };
+
     const connect = () => {
       if (cancelled) return null;
-      port = browser.runtime.connect({ name: "translate" });
-      portRef.current = port;
-      port.onMessage.addListener(handleMessage);
-      port.onDisconnect.addListener(() => {
-        if (portRef.current === port) portRef.current = null;
-        port = null;
+      if (portRef.current) return portRef.current;
+      let next: Browser.runtime.Port;
+      try {
+        next = browser.runtime.connect({ name: "translate" });
+      } catch {
+        scheduleReconnect();
+        return null;
+      }
+      port = next;
+      portRef.current = next;
+      next.onMessage.addListener(handleMessage);
+      next.onDisconnect.addListener(() => {
+        const disconnectError = consumeRuntimeLastError();
+        if (portRef.current === next) portRef.current = null;
+        if (port === next) port = null;
         if (activeRequestRef.current) {
           activeRequestRef.current = null;
           setTranslating(false);
           setChunkProgress(null);
         }
         if (cancelled) return;
-        reconnectTimer = setTimeout(connect, 80);
+        if (/Extension context invalidated/i.test(disconnectError)) return;
+        scheduleReconnect();
       });
-      return port;
+      return next;
+    };
+
+    const wakeThenConnect = () => {
+      void sendBg({ type: "warmup" }).then((res) => {
+        if (cancelled || portRef.current) return;
+        if (res.ok) connect();
+        else scheduleReconnect();
+      }).catch(() => {
+        if (!cancelled && !portRef.current) scheduleReconnect();
+      });
     };
 
     ensurePortRef.current = () => portRef.current ?? connect();
-    connect();
+    wakeThenConnect();
 
     return () => {
       cancelled = true;
