@@ -62,13 +62,21 @@ export default function SettingsInstanceSetup({
         <div className="settings-setup-step">
           <span className="settings-step-num">1</span>
           <div className="settings-step-body">
-            <span className="settings-step-label">实例地址</span>
+            <label htmlFor="baseUrl" className="settings-step-label">
+              实例地址
+            </label>
             <input
               id="baseUrl"
               type="url"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="url"
               placeholder="https://translate.example.com"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
+              aria-describedby={pingOk || pingBusy ? "ping-status" : undefined}
             />
             <div className="settings-step-actions">
               <button
@@ -87,6 +95,7 @@ export default function SettingsInstanceSetup({
                 )}
               </button>
               <span
+                id="ping-status"
                 className={[
                   "settings-ping-status",
                   pingBusy ? "is-busy" : pingOk ? "is-ok" : "is-idle",
@@ -144,11 +153,11 @@ export default function SettingsInstanceSetup({
               type="button"
               className="btn btn-lg"
               onClick={onLogin}
-              disabled={busy || !baseUrl.trim()}
+              disabled={busy || !baseUrl.trim() || !email.trim() || !password}
             >
-              {busy && email ? "提交中…" : "登录并绑定"}
+              {busy ? "提交中…" : "登录并绑定"}
             </button>
-            <p className="muted settings-hint">按 Enter 可快速登录</p>
+            <p className="muted settings-hint">填写完成后按 Enter 登录</p>
           </div>
         </div>
       </div>

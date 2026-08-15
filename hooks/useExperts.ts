@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GENERAL_EXPERT_ID } from "@/lib/experts";
 import { sendBg } from "@/lib/messaging";
 import type { ExtensionState } from "@/lib/messaging";
@@ -13,10 +13,24 @@ type UseExpertsOptions = {
 export function useExperts({ enabled, userId, onPrefsAdjusted }: UseExpertsOptions) {
   const [experts, setExperts] = useState<AiExpertMeta[]>([]);
   const [defaultExpertId, setDefaultExpertId] = useState(GENERAL_EXPERT_ID);
+  const generationRef = useRef(0);
+  const onPrefsAdjustedRef = useRef(onPrefsAdjusted);
+  onPrefsAdjustedRef.current = onPrefsAdjusted;
 
   const reload = useCallback(async () => {
+    const generation = ++generationRef.current;
     const res = await sendBg<AiExpertsPublicResponse>({ type: "getExperts" });
-    if (!res.ok || !res.data) {
+    if (generation !== generationRef.current) return;
+
+    if (!res.ok) {
+      setExperts([]);
+      setDefaultExpertId(GENERAL_EXPERT_ID);
+      if (res.status === 401 || res.status === 403) {
+        await onPrefsAdjustedRef.current?.();
+      }
+      return;
+    }
+    if (!res.data) {
       setExperts([]);
       setDefaultExpertId(GENERAL_EXPERT_ID);
       return;
@@ -29,24 +43,27 @@ export function useExperts({ enabled, userId, onPrefsAdjusted }: UseExpertsOptio
 
     if (list.length === 0) {
       const current = await sendBg<ExtensionState>({ type: "getState" });
+      if (generation !== generationRef.current) return;
       if (current.data?.expertId && current.data.expertId !== GENERAL_EXPERT_ID) {
         await sendBg<ExtensionState>({ type: "setPrefs", expertId: GENERAL_EXPERT_ID });
-        await onPrefsAdjusted?.();
+        await onPrefsAdjustedRef.current?.();
       }
       return;
     }
 
     const current = await sendBg<ExtensionState>({ type: "getState" });
+    if (generation !== generationRef.current) return;
     const stored = current.data?.expertId ?? GENERAL_EXPERT_ID;
     const validIds = new Set(list.map((item) => item.id));
     if (stored !== GENERAL_EXPERT_ID && !validIds.has(stored)) {
       await sendBg<ExtensionState>({ type: "setPrefs", expertId: nextDefault });
-      await onPrefsAdjusted?.();
+      await onPrefsAdjustedRef.current?.();
     }
-  }, [onPrefsAdjusted]);
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
+      generationRef.current += 1;
       setExperts([]);
       setDefaultExpertId(GENERAL_EXPERT_ID);
       return;

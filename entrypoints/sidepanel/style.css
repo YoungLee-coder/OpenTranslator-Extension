@@ -94,7 +94,8 @@ body {
   box-shadow: none;
 }
 
-.source-section textarea:focus {
+.source-section textarea:focus,
+.source-section textarea:focus-visible {
   box-shadow: none;
   border-color: transparent;
 }

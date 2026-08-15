@@ -1,3 +1,5 @@
+import { mergeAbortSignals } from "@/lib/abort";
+
 /** Resolve avatar to a same-origin URL under the bound instance; otherwise undefined. */
 export function resolveAvatarUrl(baseUrl: string, avatarUrl?: string): string | undefined {
   if (!avatarUrl?.trim()) return undefined;
@@ -34,17 +36,28 @@ export async function loadAvatarBlobUrl(
   baseUrl: string,
   token: string,
   avatarUrl?: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const url = resolveAvatarUrl(baseUrl, avatarUrl);
   if (!url) return undefined;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return undefined;
+  try {
+    const timeout = AbortSignal.timeout(15_000);
+    const fetchSignal = signal
+      ? mergeAbortSignals([signal, timeout])
+      : timeout;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: fetchSignal,
+    });
+    if (!res.ok) return undefined;
 
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
+    const blob = await res.blob();
+    if (signal?.aborted) return undefined;
+    return URL.createObjectURL(blob);
+  } catch {
+    return undefined;
+  }
 }
 
 export function initialsOf(email: string): string {

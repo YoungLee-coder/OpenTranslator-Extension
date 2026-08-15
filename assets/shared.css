@@ -303,9 +303,9 @@ textarea::placeholder {
   color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
 }
 
-input:focus,
-select:focus,
-textarea:focus {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: none;
   border-color: color-mix(in oklch, var(--primary) 40%, transparent);
   box-shadow: 0 0 0 2px var(--ring);

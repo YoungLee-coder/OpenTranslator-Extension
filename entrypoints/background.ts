@@ -1,55 +1,48 @@
-import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate, streamTranslateEmail } from "@/lib/api";
+import { isAbortError } from "@/lib/abort";
+import { ApiError, fetchExperts, fetchModels, login, logout, me, ping, streamTranslate } from "@/lib/api";
 import { createDeltaBatcher } from "@/lib/delta-batch";
 import { resolveExpertId } from "@/lib/experts";
-import { decodeModelKey, resolveEmailTranslateModel } from "@/lib/models";
+import { decodeModelKey } from "@/lib/models";
 import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslatePortOut } from "@/lib/messaging";
+import { consumeRuntimeLastError, parseBgRequest, parseTranslatePortIn, safePortPost } from "@/lib/messaging";
 import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
 import { clearAuth, getAuth, getAuthAndPrefs, setAuth, setPrefs } from "@/lib/storage";
 import type { AiExpertsPublicResponse, ExtensionAuth, TranslateModelsResponse } from "@/types";
-import { emptyEmailStreamError } from "@/lib/email/visible-text";
 import { normalizeBaseUrl } from "@/lib/url";
 
 const SESSION_ALARM = "session-check";
 const SESSION_CHECK_MINUTES = 30;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
-/** Skip /api/auth/me on translate when recently verified (aligned with models cache). */
-const SESSION_TTL_MS = CATALOG_TTL_MS;
 const PORT_KEEPALIVE_MS = 20_000;
 
 type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
+type CatalogInflight<T> = {
+  userId: string;
+  promise: Promise<T>;
+  abort: AbortController;
+};
 
 let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
 let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
-let modelsInflight: { userId: string; promise: Promise<TranslateModelsResponse> } | null = null;
-let expertsInflight: { userId: string; promise: Promise<AiExpertsPublicResponse> } | null = null;
-/** Last successful /api/auth/me (or login) for the bound user. */
-let sessionVerified: { userId: string; at: number } | null = null;
+let modelsInflight: CatalogInflight<TranslateModelsResponse> | null = null;
+let expertsInflight: CatalogInflight<AiExpertsPublicResponse> | null = null;
 
-/** In-flight one-shot email translates (sendMessage keeps SW alive until Promise settles). */
-const emailAborts = new Map<string, AbortController>();
+function abortCatalogInflight() {
+  modelsInflight?.abort.abort();
+  expertsInflight?.abort.abort();
+  modelsInflight = null;
+  expertsInflight = null;
+}
 
 function clearCatalogCaches() {
+  abortCatalogInflight();
   modelsCache = null;
   expertsCache = null;
 }
 
-function clearSessionCache() {
-  sessionVerified = null;
-}
-
 function clearAuthCaches() {
   clearCatalogCaches();
-  clearSessionCache();
-}
-
-function markSessionVerified(userId: string) {
-  sessionVerified = { userId, at: Date.now() };
-}
-
-function isSessionFresh(userId: string): boolean {
-  if (!sessionVerified || sessionVerified.userId !== userId) return false;
-  return Date.now() - sessionVerified.at <= SESSION_TTL_MS;
 }
 
 function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null {
@@ -62,45 +55,55 @@ async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsRe
   const cached = cacheFresh(modelsCache, auth.user.id);
   if (cached) return cached;
   if (modelsInflight?.userId === auth.user.id) return modelsInflight.promise;
-  const promise = fetchModels(auth.baseUrl, auth.token)
+  if (modelsInflight) {
+    modelsInflight.abort.abort();
+    modelsInflight = null;
+  }
+
+  const abort = new AbortController();
+  const promise = fetchModels(auth.baseUrl, auth.token, abort.signal)
     .then((data) => {
-      modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+      if (!abort.signal.aborted) {
+        modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+      }
       return data;
     })
     .finally(() => {
       if (modelsInflight?.promise === promise) modelsInflight = null;
     });
-  modelsInflight = { userId: auth.user.id, promise };
+  modelsInflight = { userId: auth.user.id, promise, abort };
   return promise;
 }
 
 /** Warm models catalog without blocking the caller. */
 function prefetchModelsCatalog(auth: ExtensionAuth): void {
-  void loadModelsCatalog(auth).catch(() => {
-    // Best-effort warm; translate path will retry.
+  void loadModelsCatalog(auth).catch((err) => {
+    if (isAbortError(err)) return;
   });
 }
 
-/**
- * Use a short-lived session cache so translate clicks skip /api/auth/me.
- * Still re-validates when TTL expires; 401 from translate clears auth as before.
- */
-async function ensureSession(
-  auth: ExtensionAuth,
-): Promise<{ ok: true } | { ok: false; status: number }> {
-  if (isSessionFresh(auth.user.id)) return { ok: true };
+async function loadExpertsCatalog(auth: ExtensionAuth): Promise<AiExpertsPublicResponse> {
+  const cached = cacheFresh(expertsCache, auth.user.id);
+  if (cached) return cached;
+  if (expertsInflight?.userId === auth.user.id) return expertsInflight.promise;
+  if (expertsInflight) {
+    expertsInflight.abort.abort();
+    expertsInflight = null;
+  }
 
-  const session = await me(auth.baseUrl, auth.token);
-  if (!session.authenticated) {
-    await clearAuth();
-    clearAuthCaches();
-    return { ok: false, status: 401 };
-  }
-  if (session.user) {
-    await setAuth({ ...auth, user: session.user });
-  }
-  markSessionVerified(auth.user.id);
-  return { ok: true };
+  const abort = new AbortController();
+  const promise = fetchExperts(auth.baseUrl, auth.token, abort.signal)
+    .then((data) => {
+      if (!abort.signal.aborted) {
+        expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+      }
+      return data;
+    })
+    .finally(() => {
+      if (expertsInflight?.promise === promise) expertsInflight = null;
+    });
+  expertsInflight = { userId: auth.user.id, promise, abort };
+  return promise;
 }
 
 async function verifyBound(): Promise<ExtensionState> {
@@ -116,7 +119,6 @@ async function verifyBound(): Promise<ExtensionState> {
     if (session.user) {
       await setAuth({ ...auth, user: session.user });
     }
-    markSessionVerified(auth.user.id);
     return readExtensionState();
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -129,6 +131,15 @@ async function verifyBound(): Promise<ExtensionState> {
 
 function fail(error: string, status?: number, kind?: string): BgResponse {
   return { ok: false, error, status, kind };
+}
+
+async function handleUnauthorizedCatalog(err: ApiError): Promise<BgResponse> {
+  if (err.status === 401 || err.status === 403) {
+    await clearAuth();
+    clearAuthCaches();
+    return fail("登录已过期，请重新登录", err.status, err.kind);
+  }
+  return fail(err.message, err.status, err.kind);
 }
 
 async function handleMessage(request: BgRequest): Promise<BgResponse> {
@@ -152,7 +163,6 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         };
         await setAuth(auth);
         clearCatalogCaches();
-        markSessionVerified(data.user.id);
         prefetchModelsCatalog(auth);
         return { ok: true, data };
       }
@@ -196,29 +206,26 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
-        const data = await loadModelsCatalog(auth);
-        return { ok: true, data };
+        try {
+          const data = await loadModelsCatalog(auth);
+          return { ok: true, data };
+        } catch (err) {
+          if (err instanceof ApiError) return handleUnauthorizedCatalog(err);
+          throw err;
+        }
       }
       case "getExperts": {
         const auth = await getAuth();
         if (!auth) {
           return fail("请先登录你的 OpenTranslator 实例", 401);
         }
-        const cached = cacheFresh(expertsCache, auth.user.id);
-        if (cached) return { ok: true, data: cached };
-        if (expertsInflight?.userId === auth.user.id) {
-          return { ok: true, data: await expertsInflight.promise };
+        try {
+          const data = await loadExpertsCatalog(auth);
+          return { ok: true, data };
+        } catch (err) {
+          if (err instanceof ApiError) return handleUnauthorizedCatalog(err);
+          throw err;
         }
-        const promise = fetchExperts(auth.baseUrl, auth.token)
-          .then((data) => {
-            expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
-            return data;
-          })
-          .finally(() => {
-            if (expertsInflight?.promise === promise) expertsInflight = null;
-          });
-        expertsInflight = { userId: auth.user.id, promise };
-        return { ok: true, data: await promise };
       }
       case "setPrefs": {
         await setPrefs({
@@ -226,111 +233,17 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           targetLang: request.targetLang,
           modelKey: request.modelKey,
           expertId: request.expertId,
-          emailEnabled: request.emailEnabled,
-          emailTranslateMode: request.emailTranslateMode,
         });
         const state = await readExtensionState();
         return { ok: true, data: state };
-      }
-      case "abortTranslateEmail": {
-        emailAborts.get(request.requestId)?.abort();
-        emailAborts.delete(request.requestId);
-        return { ok: true };
-      }
-      case "translateEmail": {
-        const { auth, prefs } = await getAuthAndPrefs();
-        if (!auth) {
-          return fail("请先登录你的 OpenTranslator 实例", 401);
-        }
-
-        // Don't block on /api/auth/me — 401 from translateEmail still clears auth.
-        void ensureSession(auth);
-
-        let preferred: { providerId: string; model: string } | undefined;
-        if (prefs.modelKey) {
-          try {
-            preferred = decodeModelKey(prefs.modelKey);
-          } catch {
-            // ignore invalid stored key
-          }
-        }
-
-        // DeepL cannot do email HTML — pick an LLM even if the user default is DeepL.
-        const catalog = await loadModelsCatalog(auth);
-        const resolved = resolveEmailTranslateModel(
-          catalog.models,
-          catalog.default,
-          preferred,
-        );
-        if (!resolved) {
-          return fail("Email 翻译不支持 DeepL，请先配置可用的 LLM 模型");
-        }
-
-        const abort = new AbortController();
-        emailAborts.set(request.requestId, abort);
-
-        try {
-          let translated = "";
-          let detectedSourceLang: string | undefined;
-          let sawTerminal = false;
-          for await (const event of streamTranslateEmail(
-            auth.baseUrl,
-            auth.token,
-            {
-              html: request.html,
-              sourceLang: request.sourceLang,
-              targetLang: request.targetLang,
-              providerId: resolved.providerId,
-              model: resolved.model,
-              preserveQuotes: request.preserveQuotes !== false,
-              display: request.display === "bilingual" ? "bilingual" : "replace",
-            },
-            abort.signal,
-          )) {
-            if (abort.signal.aborted) {
-              return fail("已取消");
-            }
-            if (event.type === "delta") {
-              if (typeof event.text === "string") translated += event.text;
-            } else if (event.type === "done") {
-              sawTerminal = true;
-              translated = event.translatedText || translated;
-              detectedSourceLang = event.detectedSourceLang;
-            } else if (event.type === "error") {
-              sawTerminal = true;
-              return fail(event.error);
-            }
-          }
-
-          const text = translated.trim();
-          if (!text) {
-            return fail(emptyEmailStreamError(translated, sawTerminal));
-          }
-          return {
-            ok: true,
-            data: { translatedText: text, detectedSourceLang },
-          };
-        } catch (err) {
-          if (abort.signal.aborted) {
-            return fail("已取消");
-          }
-          if (err instanceof ApiError) {
-            if (err.status === 401 || err.status === 403) {
-              await clearAuth();
-              clearAuthCaches();
-              return fail("登录已过期，请重新登录", err.status);
-            }
-            return fail(err.message, err.status, err.kind);
-          }
-          return fail(err instanceof Error ? err.message : String(err));
-        } finally {
-          emailAborts.delete(request.requestId);
-        }
       }
       default:
         return fail("未知请求");
     }
   } catch (err) {
+    if (isAbortError(err)) {
+      return fail("已取消", 0, "network");
+    }
     if (err instanceof ApiError) {
       return fail(err.message, err.status, err.kind);
     }
@@ -346,9 +259,18 @@ function isTrustedExtensionSender(sender?: { id?: string }): boolean {
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((request: BgRequest, sender) => {
+  self.addEventListener("unhandledrejection", (event) => {
+    console.error("[opentranslator]", event.reason);
+  });
+  self.addEventListener("error", (event) => {
+    console.error("[opentranslator]", event.error ?? event.message);
+  });
+
+  browser.runtime.onMessage.addListener((request: unknown, sender) => {
     if (!isTrustedExtensionSender(sender)) return;
-    return handleMessage(request);
+    const parsed = parseBgRequest(request);
+    if (!parsed) return Promise.resolve(fail("未知请求"));
+    return handleMessage(parsed);
   });
 
   browser.runtime.onConnect.addListener((port) => {
@@ -356,7 +278,10 @@ export default defineBackground(() => {
       port.disconnect();
       return;
     }
-    if (port.name !== "translate") return;
+    if (port.name !== "translate") {
+      port.disconnect();
+      return;
+    }
 
     let abortController: AbortController | null = null;
     let disconnected = false;
@@ -369,6 +294,14 @@ export default defineBackground(() => {
       }
     };
 
+    const post = (msg: TranslatePortOut) => {
+      if (disconnected) return;
+      if (!safePortPost(port, msg)) {
+        disconnected = true;
+        stopKeepAlive();
+      }
+    };
+
     const startKeepAlive = () => {
       stopKeepAlive();
       keepAliveTimer = setInterval(() => {
@@ -376,28 +309,10 @@ export default defineBackground(() => {
       }, PORT_KEEPALIVE_MS);
     };
 
-    const post = (msg: TranslatePortOut) => {
-      if (disconnected) return;
-      try {
-        port.postMessage(msg);
-      } catch {
-        // Port already closed by the other end (common after abort / done).
-        disconnected = true;
-        stopKeepAlive();
-      }
-    };
-
-    port.onMessage.addListener(async (msg: TranslatePortIn) => {
-      if (msg.type === "abort") {
-        abortController?.abort();
-        return;
-      }
-      // Email translate uses sendMessage (translateEmail); Port is for streaming text.
-      if (msg.type !== "start") return;
-
-      abortController?.abort();
-      abortController = new AbortController();
-      const thisAbort = abortController;
+    const runTranslate = async (
+      msg: Extract<TranslatePortIn, { type: "start" }>,
+      thisAbort: AbortController,
+    ) => {
       const signal = thisAbort.signal;
       const requestId = msg.requestId;
       startKeepAlive();
@@ -418,11 +333,14 @@ export default defineBackground(() => {
         return;
       }
 
-      try {
-        // Token expiry is handled by 401 on the translate request itself.
-        // A blocking /api/auth/me here adds a full RTT after every SW restart.
-        void ensureSession(auth);
+      const dropStream = () => {
+        deltas.clear();
+        if (signal.aborted || disconnected) {
+          post({ type: "aborted", requestId });
+        }
+      };
 
+      try {
         let providerId: string | undefined;
         let model: string | undefined;
         if (prefs.modelKey) {
@@ -449,8 +367,7 @@ export default defineBackground(() => {
           signal,
         )) {
           if (signal.aborted || disconnected) {
-            deltas.drain();
-            post({ type: "aborted", requestId });
+            dropStream();
             return;
           }
           if (event.type === "delta") {
@@ -479,7 +396,11 @@ export default defineBackground(() => {
             post({ type: "error", requestId, error: event.error });
           }
         }
-        if (!sawTerminal && !signal.aborted && !disconnected) {
+        if (signal.aborted || disconnected) {
+          dropStream();
+          return;
+        }
+        if (!sawTerminal) {
           deltas.drain();
           if (translated.trim()) {
             post({ type: "done", requestId, translatedText: translated });
@@ -488,11 +409,11 @@ export default defineBackground(() => {
           }
         }
       } catch (err) {
-        deltas.drain();
-        if (signal.aborted || disconnected) {
-          post({ type: "aborted", requestId });
+        if (signal.aborted || disconnected || isAbortError(err)) {
+          dropStream();
           return;
         }
+        deltas.drain();
         if (err instanceof ApiError) {
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
@@ -523,9 +444,26 @@ export default defineBackground(() => {
       } finally {
         if (abortController === thisAbort) stopKeepAlive();
       }
+    };
+
+    // Return immediately: an async listener promise would hit Chrome's 5-minute
+    // event-handler cap and kill the SW mid-stream. Port keepalive resets idle.
+    port.onMessage.addListener((raw: unknown) => {
+      const msg = parseTranslatePortIn(raw);
+      if (!msg) return;
+      if (msg.type === "abort") {
+        abortController?.abort();
+        return;
+      }
+      if (msg.type !== "start") return;
+
+      abortController?.abort();
+      abortController = new AbortController();
+      void runTranslate(msg, abortController);
     });
 
     port.onDisconnect.addListener(() => {
+      consumeRuntimeLastError();
       disconnected = true;
       stopKeepAlive();
       abortController?.abort();

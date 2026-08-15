@@ -1,4 +1,8 @@
+import { isAbortError } from "@/lib/abort";
 import type { TranslateStreamEvent } from "@/types";
+
+/** Drop the connection if a single SSE frame grows past this (protects SW memory). */
+export const MAX_SSE_BUFFER_BYTES = 2 * 1024 * 1024;
 
 function nextFrameBreak(buffer: string): { index: number; width: number } | null {
   const crlf = buffer.indexOf("\r\n\r\n");
@@ -25,6 +29,14 @@ function parseSseBlock(block: string): TranslateStreamEvent | null {
   }
 }
 
+async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    // already closed or released
+  }
+}
+
 /** Parse SSE frames from a fetch ReadableStream body. */
 export async function* parseSseStream(
   body: ReadableStream<Uint8Array>,
@@ -33,18 +45,40 @@ export async function* parseSseStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const onAbort = () => {
+    void cancelReader(reader);
+  };
+  signal?.addEventListener("abort", onAbort);
 
   try {
+    if (signal?.aborted) {
+      await cancelReader(reader);
+      return;
+    }
+
     while (true) {
-      if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) return;
+        throw err;
+      }
+
+      const { done, value } = chunk;
       if (done) {
         buffer += decoder.decode();
         const event = parseSseBlock(buffer);
         if (event) yield event;
         break;
       }
+
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+        await cancelReader(reader);
+        throw new Error("译文数据异常，请重试");
+      }
+
       let sep = nextFrameBreak(buffer);
       while (sep) {
         const block = buffer.slice(0, sep.index);
@@ -54,7 +88,18 @@ export async function* parseSseStream(
         sep = nextFrameBreak(buffer);
       }
     }
+  } catch (err) {
+    if (!signal?.aborted && !isAbortError(err)) {
+      await cancelReader(reader);
+    }
+    if (signal?.aborted || isAbortError(err)) return;
+    throw err;
   } finally {
-    reader.releaseLock();
+    signal?.removeEventListener("abort", onAbort);
+    try {
+      reader.releaseLock();
+    } catch {
+      // cancelled paths already release the lock
+    }
   }
 }

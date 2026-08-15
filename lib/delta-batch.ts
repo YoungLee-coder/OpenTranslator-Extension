@@ -5,9 +5,15 @@
 export function createDeltaBatcher(
   flush: (text: string) => void,
   intervalMs = 16,
-): { push: (text: string) => void; drain: () => void } {
+): { push: (text: string) => void; drain: () => void; clear: () => void } {
   let buffer = "";
   let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopTimer = () => {
+    if (timer == null) return;
+    clearTimeout(timer);
+    timer = null;
+  };
 
   const drain = () => {
     timer = null;
@@ -29,14 +35,16 @@ export function createDeltaBatcher(
       if (timer == null) timer = setTimeout(drain, intervalMs);
     },
     drain() {
-      if (timer != null) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      stopTimer();
       if (!buffer) return;
       const text = buffer;
       buffer = "";
       flush(text);
+    },
+    /** Drop buffered text and the pending timer without flushing (abort / disconnect). */
+    clear() {
+      stopTimer();
+      buffer = "";
     },
   };
 }

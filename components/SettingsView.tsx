@@ -12,8 +12,8 @@ import { sendBg } from "@/lib/messaging";
 import type { ExtensionState } from "@/lib/messaging";
 import { ensureHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
-import { getDraftBaseUrl, setDraftBaseUrl } from "@/lib/storage";
-import type { PingResponse, EmailTranslateMode } from "@/types";
+import { getDraftBaseUrl, setDraftBaseUrl, subscribeAuthChange } from "@/lib/storage";
+import type { PingResponse } from "@/types";
 import "./settings.css";
 
 type SettingsViewProps = {
@@ -85,10 +85,14 @@ export default function SettingsView({
       if (cancelled) return;
       await applyState(local);
     })();
+    const unsubscribe = subscribeAuthChange(() => {
+      void refresh();
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
-  }, [applyState]);
+  }, [applyState, refresh]);
 
   const clearMessages = () => {
     setError("");
@@ -151,6 +155,9 @@ export default function SettingsView({
       const hint = pingSetupHint(data);
       setPingHint(hint ?? "");
       await setDraftBaseUrl(baseUrl.trim());
+    } catch (err) {
+      resetPingState();
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setPingBusy(false);
     }
@@ -179,6 +186,8 @@ export default function SettingsView({
       await setDraftBaseUrl("");
       await refresh();
       onLoginSuccess?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -187,17 +196,29 @@ export default function SettingsView({
   const handleLogout = async () => {
     clearMessages();
     setBusy(true);
-    await sendBg({ type: "logout" });
+    try {
+      const res = await sendBg({ type: "logout" });
+      if (!res.ok) {
+        setError(formatApiError(res.error, res.status, res.kind));
+      } else {
+        setSuccess("已退出登录");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
     setBusy(false);
     resetPingState();
-    setSuccess("已退出登录");
     await refresh();
   };
 
   const handleChangeInstance = async () => {
     clearMessages();
     setBusy(true);
-    await sendBg({ type: "logout" });
+    try {
+      await sendBg({ type: "logout" });
+    } catch {
+      // still drop local session
+    }
     setBusy(false);
     resetPingState();
     setBaseUrl("");
@@ -235,32 +256,6 @@ export default function SettingsView({
     }
   };
 
-  const handleEmailEnabledChange = async (emailEnabled: boolean) => {
-    clearMessages();
-    const res = await sendBg<ExtensionState>({ type: "setPrefs", emailEnabled });
-    if (!res.ok) {
-      setError(formatApiError(res.error, res.status, res.kind));
-      return;
-    }
-    if (res.data) {
-      setState(res.data);
-      onStateChange?.(res.data);
-    }
-  };
-
-  const handleEmailTranslateModeChange = async (emailTranslateMode: EmailTranslateMode) => {
-    clearMessages();
-    const res = await sendBg<ExtensionState>({ type: "setPrefs", emailTranslateMode });
-    if (!res.ok) {
-      setError(formatApiError(res.error, res.status, res.kind));
-      return;
-    }
-    if (res.data) {
-      setState(res.data);
-      onStateChange?.(res.data);
-    }
-  };
-
   const handleBaseUrlChange = (value: string) => {
     setBaseUrl(value);
     resetPingState();
@@ -275,7 +270,7 @@ export default function SettingsView({
 
   // Wait for local storage only — no spinner / network gate.
   if (!state) {
-    return <div className={rootClass} />;
+    return <div className={rootClass} aria-busy="true" aria-label="加载中" />;
   }
 
   const isDev = import.meta.env.DEV;
@@ -290,6 +285,7 @@ export default function SettingsView({
               type="button"
               className="btn btn-ghost btn-sm settings-back"
               onClick={onBack}
+              aria-label="返回翻译"
             >
               <ArrowLeft size={14} strokeWidth={1.75} />
               返回
@@ -328,8 +324,6 @@ export default function SettingsView({
               busy={busy}
               onModelChange={(modelKey) => void handleModelChange(modelKey)}
               onExpertChange={(expertId) => void handleExpertChange(expertId)}
-              onEmailEnabledChange={(enabled) => void handleEmailEnabledChange(enabled)}
-              onEmailTranslateModeChange={(mode) => void handleEmailTranslateModeChange(mode)}
               onChangeInstance={() => void handleChangeInstance()}
               onLogout={() => void handleLogout()}
             />

@@ -11,9 +11,10 @@ import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
 import { isModelAvailabilityError } from "@/lib/experts";
 import { LANGUAGES, languageLabel } from "@/lib/languages";
-import { consumeRuntimeLastError, sendBg } from "@/lib/messaging";
+import { consumeRuntimeLastError, safePortPost, sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
+import { subscribeAuthChange } from "@/lib/storage";
 import { MAX_TRANSLATE_CHARS } from "@/types";
 
 const SettingsView = lazy(() => import("@/components/SettingsView"));
@@ -60,6 +61,7 @@ export default function App() {
   const accumulatedRef = useRef("");
   const rafRef = useRef(0);
   const queuePaintRef = useRef<() => void>(() => {});
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRef = useRef<() => Promise<ExtensionState | null>>(async () => null);
   const reloadModelsRef = useRef<() => Promise<unknown>>(async () => {});
 
@@ -101,8 +103,12 @@ export default function App() {
       const res = await sendBg<ExtensionState>({ type: "me" });
       if (!cancelled && res.ok && res.data) setState(res.data);
     })();
+    const unsubscribe = subscribeAuthChange(() => {
+      void refreshRef.current();
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -159,6 +165,10 @@ export default function App() {
           });
         }
       } else if (msg.type === "aborted") {
+        cancelPaint();
+        if (activeRequestRef.current === msg.requestId) {
+          activeRequestRef.current = null;
+        }
         setChunkProgress(null);
         setTranslating(false);
       }
@@ -195,6 +205,9 @@ export default function App() {
           activeRequestRef.current = null;
           setTranslating(false);
           setChunkProgress(null);
+          if (!cancelled && !/Extension context invalidated/i.test(disconnectError)) {
+            setError("连接中断，请重试");
+          }
         }
         if (cancelled) return;
         if (/Extension context invalidated/i.test(disconnectError)) return;
@@ -239,7 +252,7 @@ export default function App() {
     }
     cancelPaint();
     activeRequestRef.current = null;
-    portRef.current?.postMessage({ type: "abort" });
+    safePortPost(portRef.current, { type: "abort" });
     setTranslating(false);
   }, []);
 
@@ -249,7 +262,7 @@ export default function App() {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      portRef.current?.postMessage({ type: "abort" });
+      safePortPost(portRef.current, { type: "abort" });
 
       const trimmed = text.trim();
       if (!trimmed) {
@@ -287,13 +300,19 @@ export default function App() {
       setChunkProgress(null);
 
       const port = ensurePortRef.current();
-      port?.postMessage({
-        type: "start",
-        requestId,
-        text: trimmed,
-        sourceLang,
-        targetLang,
-      });
+      if (
+        !safePortPost(port, {
+          type: "start",
+          requestId,
+          text: trimmed,
+          sourceLang,
+          targetLang,
+        })
+      ) {
+        activeRequestRef.current = null;
+        setTranslating(false);
+        setError("扩展后台未就绪，请稍后重试");
+      }
     },
     [],
   );
@@ -310,13 +329,25 @@ export default function App() {
   );
 
   useEffect(() => {
-    return () => stopTranslation();
+    return () => {
+      stopTranslation();
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
   }, [stopTranslation]);
 
   const handleSourceChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     setSourceText(value);
     if (!state?.bound) return;
+    if (!value.trim()) {
+      stopTranslation();
+      accumulatedRef.current = "";
+      setTranslatedText("");
+      setError("");
+      setDetectedSourceLang(null);
+      setChunkProgress(null);
+      return;
+    }
     if (isImmediateInput(event)) {
       runTranslation(value, state.sourceLang, state.targetLang);
       return;
@@ -377,9 +408,18 @@ export default function App() {
 
   const handleCopy = async () => {
     if (!translatedText) return;
-    await navigator.clipboard.writeText(translatedText);
+    try {
+      await navigator.clipboard.writeText(translatedText);
+    } catch {
+      setError("复制失败，请手动选择文本");
+      return;
+    }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => {
+      copiedTimerRef.current = null;
+      setCopied(false);
+    }, 2000);
   };
 
   const handleClearSource = () => {
@@ -399,7 +439,7 @@ export default function App() {
 
   // First paint waits only for local storage (typically <10ms) — no spinner.
   if (!state) {
-    return <div className="sidepanel" />;
+    return <div className="sidepanel" aria-busy="true" aria-label="加载中" />;
   }
 
   if (view === "settings" || !state.bound) {
@@ -437,7 +477,6 @@ export default function App() {
           <select
             value={state.sourceLang}
             onChange={(e) => void handleSourceLangChange(e.target.value)}
-            disabled={translating}
             aria-label="源语言"
           >
             {sourceLangs.map((l) => (
@@ -450,7 +489,7 @@ export default function App() {
             type="button"
             className="btn btn-outline btn-icon"
             onClick={() => void handleSwapLanguages()}
-            disabled={translating || state.sourceLang === "auto"}
+            disabled={state.sourceLang === "auto"}
             title={state.sourceLang === "auto" ? "自动检测时无法互换" : "互换语言"}
             aria-label="互换语言"
           >
@@ -459,7 +498,6 @@ export default function App() {
           <select
             value={state.targetLang}
             onChange={(e) => void handleTargetLangChange(e.target.value)}
-            disabled={translating}
             aria-label="目标语言"
           >
             {targetLangs.map((l) => (
@@ -477,9 +515,9 @@ export default function App() {
               value={sourceText}
               onChange={handleSourceChange}
               onKeyDown={handleKeyDown}
-              disabled={translating}
               autoFocus
               aria-label="原文"
+              aria-busy={translating}
             />
             <div className="panel-footer">
               <span className="panel-section-label">
@@ -511,6 +549,7 @@ export default function App() {
                     type="button"
                     className="btn btn-outline btn-sm"
                     onClick={stopTranslation}
+                    aria-label="停止翻译"
                   >
                     <Square size={12} fill="currentColor" strokeWidth={0} />
                     停止
@@ -591,6 +630,7 @@ export default function App() {
                     type="button"
                     className="btn btn-ghost btn-sm"
                     onClick={() => void handleCopy()}
+                    aria-label={copied ? "已复制译文" : "复制译文"}
                   >
                     {copied ? (
                       <>

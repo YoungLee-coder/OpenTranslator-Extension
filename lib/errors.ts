@@ -5,8 +5,7 @@ export function formatApiError(
   kind?: string,
   retryAfterSeconds?: number,
 ): string {
-  if (kind === "cors") return error;
-  if (status === 401) return "邮箱或密码错误";
+  if (kind === "cors" || kind === "timeout" || kind === "disconnected") return error;
   if (status === 403) {
     if (/private/i.test(error)) return "站点为私有模式，请先登录";
     return error || "无权访问";
@@ -21,6 +20,6 @@ export function formatApiError(
   if (status === 400 && /exceeds maximum length|maximum length/i.test(error)) {
     return "原文过长，请缩短后再试（上限 80 000 字符）";
   }
-  if (status === 0 && kind === "network") return error;
+  if (status === 0 && (kind === "network" || kind === "timeout")) return error;
   return error;
 }

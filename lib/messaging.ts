@@ -2,7 +2,6 @@
 import type {
   AiExpertsPublicResponse,
   AuthUser,
-  EmailTranslateMode,
   TranslateModelsResponse,
 } from "@/types";
 
@@ -23,20 +22,7 @@ export type BgRequest =
       targetLang?: string;
       modelKey?: string | null;
       expertId?: string | null;
-      emailEnabled?: boolean;
-      emailTranslateMode?: EmailTranslateMode;
-    }
-  /** One-shot whole-email translate (keeps SW alive via returned Promise). */
-  | {
-      type: "translateEmail";
-      requestId: string;
-      html: string;
-      sourceLang: string;
-      targetLang: string;
-      preserveQuotes?: boolean;
-      display?: "replace" | "bilingual";
-    }
-  | { type: "abortTranslateEmail"; requestId: string };
+    };
 
 export type BgResponse =
   | { ok: true; data?: unknown }
@@ -50,11 +36,83 @@ export interface ExtensionState {
   targetLang: string;
   modelKey: string | null;
   expertId: string;
-  emailEnabled: boolean;
-  emailTranslateMode: EmailTranslateMode;
 }
 
 export type { AiExpertsPublicResponse, TranslateModelsResponse };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function parseBgRequest(value: unknown): BgRequest | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+  switch (value.type) {
+    case "ping":
+      return typeof value.baseUrl === "string" ? { type: "ping", baseUrl: value.baseUrl } : null;
+    case "login":
+      return typeof value.baseUrl === "string" &&
+        typeof value.email === "string" &&
+        typeof value.password === "string"
+        ? {
+            type: "login",
+            baseUrl: value.baseUrl,
+            email: value.email,
+            password: value.password,
+          }
+        : null;
+    case "me":
+    case "logout":
+    case "getState":
+    case "clearAuth":
+    case "getModels":
+    case "getExperts":
+    case "warmup":
+      return { type: value.type };
+    case "setPrefs": {
+      if (value.sourceLang !== undefined && typeof value.sourceLang !== "string") return null;
+      if (value.targetLang !== undefined && typeof value.targetLang !== "string") return null;
+      if (
+        value.modelKey !== undefined &&
+        value.modelKey !== null &&
+        typeof value.modelKey !== "string"
+      ) {
+        return null;
+      }
+      if (
+        value.expertId !== undefined &&
+        value.expertId !== null &&
+        typeof value.expertId !== "string"
+      ) {
+        return null;
+      }
+      return {
+        type: "setPrefs",
+        sourceLang: value.sourceLang,
+        targetLang: value.targetLang,
+        modelKey: value.modelKey,
+        expertId: value.expertId,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+export function parseTranslatePortIn(value: unknown): TranslatePortIn | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+  if (value.type === "abort") return { type: "abort" };
+  if (value.type !== "start") return null;
+  if (typeof value.requestId !== "string" || !value.requestId) return null;
+  if (typeof value.text !== "string") return null;
+  if (typeof value.sourceLang !== "string" || typeof value.targetLang !== "string") return null;
+  return {
+    type: "start",
+    requestId: value.requestId,
+    text: value.text,
+    sourceLang: value.sourceLang,
+    targetLang: value.targetLang,
+  };
+}
 
 export type TranslatePortIn =
   | {
@@ -78,18 +136,13 @@ export type TranslatePortOut =
     }
   | {
       type: "error";
-      requestId?: string;
+      requestId: string;
       error: string;
       status?: number;
       unauthenticated?: boolean;
       retryAfterSeconds?: number;
     }
-  | { type: "aborted"; requestId?: string };
-
-export type TranslateEmailResult = {
-  translatedText: string;
-  detectedSourceLang?: string;
-};
+  | { type: "aborted"; requestId: string };
 
 const BG_RETRY_DELAYS_MS = [0, 80, 200, 500] as const;
 
@@ -109,6 +162,16 @@ export function consumeRuntimeLastError(): string {
   return browser.runtime.lastError?.message ?? "";
 }
 
+export function safePortPost(port: Browser.runtime.Port | null | undefined, msg: unknown): boolean {
+  if (!port) return false;
+  try {
+    port.postMessage(msg);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Message the service worker, retrying the MV3 wakeup race.
  * Persistent disconnects resolve as `{ ok: false }` so callers do not need a catch.
@@ -123,7 +186,12 @@ export async function sendBg<T = unknown>(
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
     try {
-      return await browser.runtime.sendMessage(request);
+      const res = (await browser.runtime.sendMessage(request)) as BgResponse | undefined;
+      if (!res) {
+        lastErr = new Error("Receiving end does not exist");
+        continue;
+      }
+      return res as BgResponse & { data?: T };
     } catch (err) {
       lastErr = err;
       if (!isDisconnectError(err)) throw err;

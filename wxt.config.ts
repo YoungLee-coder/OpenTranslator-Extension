@@ -14,10 +14,12 @@ export default defineConfig({
   }),
   manifest: {
     name: "OpenTranslator",
-    description: "使用自托管 OpenTranslator 实例进行翻译",
+    description: "在侧边栏中使用自托管 OpenTranslator 实例翻译文本",
+    homepage_url: "https://github.com/opentranslator/opentranslator",
+    minimum_chrome_version: "116",
     key: DEV_EXTENSION_KEY,
     permissions: ["storage", "alarms"],
-    host_permissions: ["http://localhost:8787/*", "https://mail.google.com/*"],
+    host_permissions: ["http://localhost:8787/*"],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     action: {
       default_title: "OpenTranslator",

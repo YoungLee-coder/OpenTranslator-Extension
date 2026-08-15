@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatApiError } from "@/lib/errors";
 import { encodeModelKey } from "@/lib/models";
 import { sendBg } from "@/lib/messaging";
@@ -17,15 +17,24 @@ export function useModels({ enabled, userId, onPrefsAdjusted }: UseModelsOptions
   const [models, setModels] = useState<TranslateModelOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const generationRef = useRef(0);
+  const onPrefsAdjustedRef = useRef(onPrefsAdjusted);
+  onPrefsAdjustedRef.current = onPrefsAdjusted;
 
   const reload = useCallback(async () => {
+    const generation = ++generationRef.current;
     setLoading(true);
     setError("");
     try {
       const res = await sendBg<TranslateModelsResponse>({ type: "getModels" });
+      if (generation !== generationRef.current) return res;
+
       if (!res.ok) {
         setModels([]);
         setError(formatApiError(res.error, res.status, res.kind));
+        if (res.status === 401 || res.status === 403) {
+          await onPrefsAdjustedRef.current?.();
+        }
         return res;
       }
 
@@ -38,31 +47,40 @@ export function useModels({ enabled, userId, onPrefsAdjusted }: UseModelsOptions
 
       if (list.length === 0) {
         const current = await sendBg<ExtensionState>({ type: "getState" });
+        if (generation !== generationRef.current) return res;
         if (current.data?.modelKey) {
           await sendBg<ExtensionState>({ type: "setPrefs", modelKey: null });
-          await onPrefsAdjusted?.();
+          await onPrefsAdjustedRef.current?.();
         }
         return res;
       }
 
       const validKeys = new Set(list.map((option) => encodeModelKey(option)));
       const current = await sendBg<ExtensionState>({ type: "getState" });
+      if (generation !== generationRef.current) return res;
       const stored = current.data?.modelKey;
       if (stored && !validKeys.has(stored)) {
         await sendBg<ExtensionState>({ type: "setPrefs", modelKey: defaultKey });
-        await onPrefsAdjusted?.();
+        await onPrefsAdjustedRef.current?.();
       }
 
       return res;
+    } catch (err) {
+      if (generation !== generationRef.current) return { ok: false as const, error: "" };
+      setModels([]);
+      setError(formatApiError(err instanceof Error ? err.message : String(err)));
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     } finally {
-      setLoading(false);
+      if (generation === generationRef.current) setLoading(false);
     }
-  }, [onPrefsAdjusted]);
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
+      generationRef.current += 1;
       setModels([]);
       setError("");
+      setLoading(false);
       return;
     }
     void reload();

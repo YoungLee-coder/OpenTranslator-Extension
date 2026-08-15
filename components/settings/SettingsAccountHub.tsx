@@ -4,7 +4,6 @@ import {
   ExternalLink,
   Languages,
   LogOut,
-  Mail,
   Server,
   Sparkles,
 } from "lucide-react";
@@ -13,7 +12,7 @@ import { expertLabel, GENERAL_EXPERT_ID } from "@/lib/experts";
 import { languageLabel } from "@/lib/languages";
 import { encodeModelKey, modelOptionLabel } from "@/lib/models";
 import type { ExtensionState } from "@/lib/messaging";
-import type { AiExpertMeta, EmailTranslateMode, TranslateModelOption } from "@/types";
+import type { AiExpertMeta, TranslateModelOption } from "@/types";
 import { formatInstanceHost } from "./utils";
 
 type SettingsAccountHubProps = {
@@ -27,8 +26,6 @@ type SettingsAccountHubProps = {
   busy: boolean;
   onModelChange: (modelKey: string) => void;
   onExpertChange: (expertId: string) => void;
-  onEmailEnabledChange: (enabled: boolean) => void;
-  onEmailTranslateModeChange: (mode: EmailTranslateMode) => void;
   onChangeInstance: () => void;
   onLogout: () => void;
 };
@@ -44,8 +41,6 @@ export default function SettingsAccountHub({
   busy,
   onModelChange,
   onExpertChange,
-  onEmailEnabledChange,
-  onEmailTranslateModeChange,
   onChangeInstance,
   onLogout,
 }: SettingsAccountHubProps) {
@@ -154,53 +149,6 @@ export default function SettingsAccountHub({
             <span>{languageLabel(state.targetLang)}</span>
           </dd>
         </div>
-        <div className="settings-row">
-          <dt className="settings-row-label">
-            <Mail size={14} strokeWidth={1.75} aria-hidden />
-            Email 翻译 (Beta)
-          </dt>
-          <dd className="settings-row-value settings-row-toggle">
-            <button
-              type="button"
-              role="switch"
-              className="settings-switch"
-              aria-checked={state.emailEnabled}
-              aria-label="Email 翻译 (Beta)"
-              title="Gmail 阅读邮件时显示翻译按钮（Beta）"
-              disabled={busy}
-              onClick={() => onEmailEnabledChange(!state.emailEnabled)}
-            >
-              <span className="settings-switch-thumb" aria-hidden />
-            </button>
-          </dd>
-        </div>
-        {state.emailEnabled && (
-          <div className="settings-row">
-            <dt className="settings-row-label">
-              <Languages size={14} strokeWidth={1.75} aria-hidden />
-              Email 方式
-            </dt>
-            <dd className="settings-row-value settings-row-model">
-              <select
-                className="settings-model-select"
-                value={state.emailTranslateMode}
-                onChange={(e) =>
-                  onEmailTranslateModeChange(e.target.value as EmailTranslateMode)
-                }
-                disabled={busy}
-                aria-label="Email 翻译方式"
-                title={
-                  state.emailTranslateMode === "bilingual"
-                    ? "整封生成双语对照 HTML，可切换回原文"
-                    : "整封一次翻译并替换正文，可还原原文"
-                }
-              >
-                <option value="replace">整封替换</option>
-                <option value="bilingual">双语对照</option>
-              </select>
-            </dd>
-          </div>
-        )}
       </dl>
 
       <div className="settings-hub-actions">

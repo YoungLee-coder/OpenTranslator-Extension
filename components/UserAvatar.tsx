@@ -13,19 +13,35 @@ export default function UserAvatar({ user, baseUrl, className }: UserAvatarProps
   const [avatarSrc, setAvatarSrc] = useState<string>();
 
   useEffect(() => {
-    let objectUrl: string | undefined;
-    let cancelled = false;
+    const abort = new AbortController();
+    const objectUrlRef = { current: undefined as string | undefined };
 
     void (async () => {
-      const auth = await getAuth();
-      if (!auth?.token || cancelled) return;
-      objectUrl = await loadAvatarBlobUrl(baseUrl, auth.token, user.avatarUrl);
-      if (!cancelled) setAvatarSrc(objectUrl);
+      try {
+        const auth = await getAuth();
+        if (!auth?.token || abort.signal.aborted) return;
+        const url = await loadAvatarBlobUrl(
+          baseUrl,
+          auth.token,
+          user.avatarUrl,
+          abort.signal,
+        );
+        if (!url) return;
+        objectUrlRef.current = url;
+        if (abort.signal.aborted) {
+          URL.revokeObjectURL(url);
+          objectUrlRef.current = undefined;
+          return;
+        }
+        setAvatarSrc(url);
+      } catch {
+        // aborted or network — keep initials
+      }
     })();
 
     return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      abort.abort();
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
   }, [baseUrl, user.avatarUrl]);
 
