@@ -10,7 +10,7 @@ import {
 import { useModels } from "@/hooks/useModels";
 import { formatApiError } from "@/lib/errors";
 import { isModelAvailabilityError } from "@/lib/experts";
-import { LANGUAGES, languageLabel } from "@/lib/languages";
+import { isRtlLanguage, LANGUAGES, languageLabel } from "@/lib/languages";
 import { consumeRuntimeLastError, safePortPost, sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
@@ -160,9 +160,10 @@ export default function App() {
           void reloadModelsRef.current();
         }
         if (msg.unauthenticated) {
-          void refreshRef.current().then((data) => {
+          void (async () => {
+            const data = await refreshRef.current();
             if (!data?.bound) setView("settings");
-          });
+          })();
         }
       } else if (msg.type === "aborted") {
         cancelPaint();
@@ -217,13 +218,16 @@ export default function App() {
     };
 
     const wakeThenConnect = () => {
-      void sendBg({ type: "warmup" }).then((res) => {
-        if (cancelled || portRef.current) return;
-        if (res.ok) connect();
-        else scheduleReconnect();
-      }).catch(() => {
-        if (!cancelled && !portRef.current) scheduleReconnect();
-      });
+      void (async () => {
+        try {
+          const res = await sendBg({ type: "warmup" });
+          if (cancelled || portRef.current) return;
+          if (res.ok) connect();
+          else scheduleReconnect();
+        } catch {
+          if (!cancelled && !portRef.current) scheduleReconnect();
+        }
+      })();
     };
 
     ensurePortRef.current = () => portRef.current ?? connect();
@@ -439,13 +443,23 @@ export default function App() {
 
   // First paint waits only for local storage (typically <10ms) — no spinner.
   if (!state) {
-    return <div className="sidepanel" aria-busy="true" aria-label="加载中" />;
+    return (
+      <div className="sidepanel" role="status" aria-live="polite">
+        <span className="visually-hidden">加载中</span>
+      </div>
+    );
   }
 
   if (view === "settings" || !state.bound) {
     return (
       <div className="sidepanel">
-        <Suspense fallback={<div className="sidepanel" />}>
+        <Suspense
+          fallback={
+            <div className="sidepanel" role="status" aria-live="polite">
+              <span className="visually-hidden">加载中</span>
+            </div>
+          }
+        >
           <SettingsView
             variant="sidepanel"
             onBack={state.bound ? () => setView("translate") : undefined}
@@ -461,8 +475,12 @@ export default function App() {
   const targetLangs = LANGUAGES.filter((l) => l.code !== "auto");
   const canTranslate = sourceText.trim().length > 0 && !translating;
 
+  const sourceDir = isRtlLanguage(state.sourceLang) ? "rtl" : "ltr";
+  const targetDir = isRtlLanguage(state.targetLang) ? "rtl" : "ltr";
+
   return (
-    <div className="sidepanel animate-rise">
+    <main className="sidepanel animate-rise">
+      <h1 className="visually-hidden">翻译</h1>
       <div className="card sidepanel-card">
         <div className="lang-bar">
           <button
@@ -516,6 +534,8 @@ export default function App() {
               onChange={handleSourceChange}
               onKeyDown={handleKeyDown}
               autoFocus
+              lang={state.sourceLang === "auto" ? undefined : state.sourceLang}
+              dir={state.sourceLang === "auto" ? undefined : sourceDir}
               aria-label="原文"
               aria-busy={translating}
             />
@@ -605,7 +625,13 @@ export default function App() {
           )}
 
           <div className="target-section">
-            <div className="target-content" aria-live="polite" aria-label="译文">
+            <div
+              className="target-content"
+              aria-live="polite"
+              aria-label="译文"
+              lang={state.targetLang}
+              dir={targetDir}
+            >
               {error ? (
                 <span className="target-error" role="alert">{error}</span>
               ) : translating || translatedText ? (
@@ -650,6 +676,6 @@ export default function App() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -25,3 +25,7 @@ export const LANGUAGES: Language[] = [
 export function languageLabel(code: string): string {
   return LANGUAGES.find((l) => l.code === code)?.label ?? code;
 }
+
+export function isRtlLanguage(code: string): boolean {
+  return code === "ar";
+}

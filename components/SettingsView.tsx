@@ -106,20 +106,6 @@ export default function SettingsView({
     setPingHint("");
   };
 
-  const handleFormKeyDown = (e: React.KeyboardEvent) => {
-    if (
-      e.key === "Enter" &&
-      !bound &&
-      !busy &&
-      baseUrl.trim() &&
-      email &&
-      password
-    ) {
-      e.preventDefault();
-      void handleLogin();
-    }
-  };
-
   const handleTestConnection = async () => {
     setError("");
     setSuccess("");
@@ -191,6 +177,11 @@ export default function SettingsView({
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void handleLogin();
   };
 
   const handleLogout = async () => {
@@ -270,14 +261,18 @@ export default function SettingsView({
 
   // Wait for local storage only — no spinner / network gate.
   if (!state) {
-    return <div className={rootClass} aria-busy="true" aria-label="加载中" />;
+    return (
+      <div className={rootClass} role="status" aria-live="polite">
+        <span className="visually-hidden">加载中</span>
+      </div>
+    );
   }
 
   const isDev = import.meta.env.DEV;
   const isSidepanel = variant === "sidepanel";
 
   return (
-    <div className={rootClass}>
+    <main className={rootClass}>
       {isSidepanel && (
         <header className="settings-header-bar">
           {onBack ? (
@@ -346,8 +341,7 @@ export default function SettingsView({
             onEmailChange={setEmail}
             onPasswordChange={setPassword}
             onTestConnection={() => void handleTestConnection()}
-            onLogin={() => void handleLogin()}
-            onFormKeyDown={handleFormKeyDown}
+            onFormSubmit={handleFormSubmit}
           />
         )}
 
@@ -369,6 +363,6 @@ export default function SettingsView({
           </details>
         )}
       </div>
-    </div>
+    </main>
   );
 }

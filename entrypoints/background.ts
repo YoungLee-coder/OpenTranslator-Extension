@@ -15,16 +15,17 @@ const SESSION_ALARM = "session-check";
 const SESSION_CHECK_MINUTES = 30;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
 const PORT_KEEPALIVE_MS = 20_000;
+const MODELS_CACHE_KEY = "catalog.models";
+const EXPERTS_CACHE_KEY = "catalog.experts";
 
-type CatalogCache<T> = { userId: string; data: T; fetchedAt: number };
+type StoredCatalog<T> = { userId: string; data: T; fetchedAt: number };
 type CatalogInflight<T> = {
   userId: string;
   promise: Promise<T>;
   abort: AbortController;
 };
 
-let modelsCache: CatalogCache<TranslateModelsResponse> | null = null;
-let expertsCache: CatalogCache<AiExpertsPublicResponse> | null = null;
+/** In-flight coalescing only — must not outlive this SW instance. */
 let modelsInflight: CatalogInflight<TranslateModelsResponse> | null = null;
 let expertsInflight: CatalogInflight<AiExpertsPublicResponse> | null = null;
 
@@ -35,24 +36,48 @@ function abortCatalogInflight() {
   expertsInflight = null;
 }
 
-function clearCatalogCaches() {
+function isStoredCatalog<T>(value: unknown): value is StoredCatalog<T> {
+  if (!value || typeof value !== "object") return false;
+  const rec = value as Record<string, unknown>;
+  return typeof rec.userId === "string" && typeof rec.fetchedAt === "number" && rec.data != null;
+}
+
+async function readSessionCatalog<T>(key: string, userId: string): Promise<T | null> {
+  try {
+    const result = await browser.storage.session.get(key);
+    const cache = result[key];
+    if (!isStoredCatalog<T>(cache) || cache.userId !== userId) return null;
+    if (Date.now() - cache.fetchedAt > CATALOG_TTL_MS) return null;
+    return cache.data;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSessionCatalog<T>(key: string, userId: string, data: T): Promise<void> {
+  try {
+    const entry: StoredCatalog<T> = { userId, data, fetchedAt: Date.now() };
+    await browser.storage.session.set({ [key]: entry });
+  } catch {
+    // session quota / unavailable — next request will refetch
+  }
+}
+
+async function clearCatalogCaches() {
   abortCatalogInflight();
-  modelsCache = null;
-  expertsCache = null;
+  try {
+    await browser.storage.session.remove([MODELS_CACHE_KEY, EXPERTS_CACHE_KEY]);
+  } catch {
+    // ignore
+  }
 }
 
-function clearAuthCaches() {
-  clearCatalogCaches();
-}
-
-function cacheFresh<T>(cache: CatalogCache<T> | null, userId: string): T | null {
-  if (!cache || cache.userId !== userId) return null;
-  if (Date.now() - cache.fetchedAt > CATALOG_TTL_MS) return null;
-  return cache.data;
+async function clearAuthCaches() {
+  await clearCatalogCaches();
 }
 
 async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsResponse> {
-  const cached = cacheFresh(modelsCache, auth.user.id);
+  const cached = await readSessionCatalog<TranslateModelsResponse>(MODELS_CACHE_KEY, auth.user.id);
   if (cached) return cached;
   if (modelsInflight?.userId === auth.user.id) return modelsInflight.promise;
   if (modelsInflight) {
@@ -61,18 +86,24 @@ async function loadModelsCatalog(auth: ExtensionAuth): Promise<TranslateModelsRe
   }
 
   const abort = new AbortController();
-  const promise = fetchModels(auth.baseUrl, auth.token, abort.signal)
-    .then((data) => {
+  const entry: CatalogInflight<TranslateModelsResponse> = {
+    userId: auth.user.id,
+    abort,
+    promise: Promise.resolve(null as unknown as TranslateModelsResponse),
+  };
+  entry.promise = (async () => {
+    try {
+      const data = await fetchModels(auth.baseUrl, auth.token, abort.signal);
       if (!abort.signal.aborted) {
-        modelsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+        await writeSessionCatalog(MODELS_CACHE_KEY, auth.user.id, data);
       }
       return data;
-    })
-    .finally(() => {
-      if (modelsInflight?.promise === promise) modelsInflight = null;
-    });
-  modelsInflight = { userId: auth.user.id, promise, abort };
-  return promise;
+    } finally {
+      if (modelsInflight === entry) modelsInflight = null;
+    }
+  })();
+  modelsInflight = entry;
+  return entry.promise;
 }
 
 /** Warm models catalog without blocking the caller. */
@@ -83,7 +114,7 @@ function prefetchModelsCatalog(auth: ExtensionAuth): void {
 }
 
 async function loadExpertsCatalog(auth: ExtensionAuth): Promise<AiExpertsPublicResponse> {
-  const cached = cacheFresh(expertsCache, auth.user.id);
+  const cached = await readSessionCatalog<AiExpertsPublicResponse>(EXPERTS_CACHE_KEY, auth.user.id);
   if (cached) return cached;
   if (expertsInflight?.userId === auth.user.id) return expertsInflight.promise;
   if (expertsInflight) {
@@ -92,18 +123,24 @@ async function loadExpertsCatalog(auth: ExtensionAuth): Promise<AiExpertsPublicR
   }
 
   const abort = new AbortController();
-  const promise = fetchExperts(auth.baseUrl, auth.token, abort.signal)
-    .then((data) => {
+  const entry: CatalogInflight<AiExpertsPublicResponse> = {
+    userId: auth.user.id,
+    abort,
+    promise: Promise.resolve(null as unknown as AiExpertsPublicResponse),
+  };
+  entry.promise = (async () => {
+    try {
+      const data = await fetchExperts(auth.baseUrl, auth.token, abort.signal);
       if (!abort.signal.aborted) {
-        expertsCache = { userId: auth.user.id, data, fetchedAt: Date.now() };
+        await writeSessionCatalog(EXPERTS_CACHE_KEY, auth.user.id, data);
       }
       return data;
-    })
-    .finally(() => {
-      if (expertsInflight?.promise === promise) expertsInflight = null;
-    });
-  expertsInflight = { userId: auth.user.id, promise, abort };
-  return promise;
+    } finally {
+      if (expertsInflight === entry) expertsInflight = null;
+    }
+  })();
+  expertsInflight = entry;
+  return entry.promise;
 }
 
 async function verifyBound(): Promise<ExtensionState> {
@@ -113,7 +150,7 @@ async function verifyBound(): Promise<ExtensionState> {
     const session = await me(auth.baseUrl, auth.token);
     if (!session.authenticated) {
       await clearAuth();
-      clearAuthCaches();
+      await clearAuthCaches();
       return readExtensionState();
     }
     if (session.user) {
@@ -123,7 +160,7 @@ async function verifyBound(): Promise<ExtensionState> {
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       await clearAuth();
-      clearAuthCaches();
+      await clearAuthCaches();
     }
     return readExtensionState();
   }
@@ -136,7 +173,7 @@ function fail(error: string, status?: number, kind?: string): BgResponse {
 async function handleUnauthorizedCatalog(err: ApiError): Promise<BgResponse> {
   if (err.status === 401 || err.status === 403) {
     await clearAuth();
-    clearAuthCaches();
+    await clearAuthCaches();
     return fail("登录已过期，请重新登录", err.status, err.kind);
   }
   return fail(err.message, err.status, err.kind);
@@ -162,7 +199,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           user: data.user,
         };
         await setAuth(auth);
-        clearCatalogCaches();
+        await clearCatalogCaches();
         prefetchModelsCatalog(auth);
         return { ok: true, data };
       }
@@ -180,14 +217,14 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           }
         }
         await clearAuth();
-        clearAuthCaches();
+        await clearAuthCaches();
         if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
       case "clearAuth": {
         const auth = await getAuth();
         await clearAuth();
-        clearAuthCaches();
+        await clearAuthCaches();
         if (auth?.baseUrl) await revokeHostPermission(auth.baseUrl);
         return { ok: true };
       }
@@ -304,6 +341,8 @@ export default defineBackground(() => {
 
     const startKeepAlive = () => {
       stopKeepAlive();
+      // Open ports keep the SW alive. This interval only pings the panel;
+      // chrome.alarms cannot fire faster than 30s.
       keepAliveTimer = setInterval(() => {
         post({ type: "keepalive" });
       }, PORT_KEEPALIVE_MS);
@@ -417,7 +456,7 @@ export default defineBackground(() => {
         if (err instanceof ApiError) {
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
-            clearAuthCaches();
+            await clearAuthCaches();
             post({
               type: "error",
               requestId,
@@ -471,14 +510,21 @@ export default defineBackground(() => {
   });
 
   if (browser.sidePanel) {
-    void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+    void browser.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
+      .catch((err) => {
+        console.error("[opentranslator] sidePanel.setPanelBehavior", err);
+      });
   }
 
-  void getAuthAndPrefs()
-    .then(({ auth }) => {
+  void (async () => {
+    try {
+      const { auth } = await getAuthAndPrefs();
       if (auth) prefetchModelsCatalog(auth);
-    })
-    .catch(() => {});
+    } catch {
+      // ignore
+    }
+  })();
   void verifyBound().catch(() => {});
   void browser.alarms.create(SESSION_ALARM, {
     periodInMinutes: SESSION_CHECK_MINUTES,

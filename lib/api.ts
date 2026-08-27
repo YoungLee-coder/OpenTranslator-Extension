@@ -239,15 +239,14 @@ export async function* streamTranslate(
   signal?: AbortSignal,
 ): AsyncGenerator<TranslateStreamEvent> {
   const linked = followAbortSignal(signal);
-  let headersArrived = false;
   const clearConnectTimeout = startAbortTimeout((reason) => {
-    if (!headersArrived) linked.abort(reason);
+    linked.abort(reason);
   }, TRANSLATE_CONNECT_TIMEOUT_MS);
 
   try {
     let res: Response;
     try {
-      const pending = fetch(`${baseUrl}/api/translate`, {
+      res = await fetch(`${baseUrl}/api/translate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -257,13 +256,6 @@ export async function* streamTranslate(
         signal: linked.signal,
         priority: "high",
       });
-      void pending.then(
-        () => {
-          headersArrived = true;
-        },
-        () => {},
-      );
-      res = await pending;
     } catch (err) {
       if (linked.signal.aborted && !signal?.aborted) {
         throw new ApiError(0, "请求超时，请稍后重试", "timeout");

@@ -20,8 +20,7 @@ type SettingsInstanceSetupProps = {
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onTestConnection: () => void;
-  onLogin: () => void;
-  onFormKeyDown: (e: React.KeyboardEvent) => void;
+  onFormSubmit: (e: React.FormEvent) => void;
 };
 
 export default function SettingsInstanceSetup({
@@ -41,13 +40,12 @@ export default function SettingsInstanceSetup({
   onEmailChange,
   onPasswordChange,
   onTestConnection,
-  onLogin,
-  onFormKeyDown,
+  onFormSubmit,
 }: SettingsInstanceSetupProps) {
   const isSidepanel = variant === "sidepanel";
 
   return (
-    <section className="settings-setup" onKeyDown={onFormKeyDown}>
+    <form className="settings-setup" onSubmit={onFormSubmit}>
       {isSidepanel && (
         <div className="settings-setup-intro">
           <BrandMark size={28} className="brand-mark text-foreground" />
@@ -67,12 +65,14 @@ export default function SettingsInstanceSetup({
             </label>
             <input
               id="baseUrl"
+              name="url"
               type="url"
               inputMode="url"
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
               autoComplete="url"
+              required
               placeholder="https://translate.example.com"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
@@ -133,8 +133,10 @@ export default function SettingsInstanceSetup({
               <label htmlFor="email">邮箱</label>
               <input
                 id="email"
+                name="username"
                 type="email"
                 autoComplete="username"
+                required
                 value={email}
                 onChange={(e) => onEmailChange(e.target.value)}
               />
@@ -143,17 +145,18 @@ export default function SettingsInstanceSetup({
               <label htmlFor="password">密码</label>
               <input
                 id="password"
+                name="password"
                 type="password"
                 autoComplete="current-password"
+                required
                 value={password}
                 onChange={(e) => onPasswordChange(e.target.value)}
               />
             </div>
             <button
-              type="button"
+              type="submit"
               className="btn btn-lg"
-              onClick={onLogin}
-              disabled={busy || !baseUrl.trim() || !email.trim() || !password}
+              disabled={busy}
             >
               {busy ? "提交中…" : "登录并绑定"}
             </button>
@@ -161,6 +164,6 @@ export default function SettingsInstanceSetup({
           </div>
         </div>
       </div>
-    </section>
+    </form>
   );
 }

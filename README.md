@@ -28,7 +28,7 @@ pnpm dev
 ORIGINS=http://localhost:5173,chrome-extension://gjmakoddcjjkfidekkkcmadihemhegfk
 ```
 
-详见 [docs/ORIGINS.md](docs/ORIGINS.md)。扩展质量约定见 [docs/EXTENSION-QUALITY.md](docs/EXTENSION-QUALITY.md)。
+详见 [docs/ORIGINS.md](docs/ORIGINS.md)。上架清单见 [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)，隐私说明见 [docs/PRIVACY.md](docs/PRIVACY.md)。
 
 ### 使用流程
 

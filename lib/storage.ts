@@ -54,16 +54,16 @@ export async function getAuth(): Promise<ExtensionAuth | null> {
   ensureCacheListener();
   if (authCache !== undefined) return authCache;
   if (authInflight) return authInflight;
-  authInflight = browser.storage.local
-    .get(AUTH_KEY)
-    .then((result) => {
+  authInflight = (async () => {
+    try {
+      const result = await browser.storage.local.get(AUTH_KEY);
       if (authCache !== undefined) return authCache;
       authCache = parseAuth(result[AUTH_KEY]);
       return authCache;
-    })
-    .finally(() => {
+    } finally {
       authInflight = null;
-    });
+    }
+  })();
   return authInflight;
 }
 
@@ -81,16 +81,16 @@ export async function getPrefs(): Promise<ExtensionPrefs> {
   ensureCacheListener();
   if (prefsCache !== undefined) return prefsCache;
   if (prefsInflight) return prefsInflight;
-  prefsInflight = browser.storage.local
-    .get(PREFS_KEY)
-    .then((result) => {
+  prefsInflight = (async () => {
+    try {
+      const result = await browser.storage.local.get(PREFS_KEY);
       if (prefsCache !== undefined) return prefsCache;
       prefsCache = parsePrefs(result[PREFS_KEY]);
       return prefsCache;
-    })
-    .finally(() => {
+    } finally {
       prefsInflight = null;
-    });
+    }
+  })();
   return prefsInflight;
 }
 
@@ -104,16 +104,16 @@ export async function getAuthAndPrefs(): Promise<{
     return { auth: authCache, prefs: prefsCache };
   }
   if (pairInflight) return pairInflight;
-  pairInflight = browser.storage.local
-    .get([AUTH_KEY, PREFS_KEY])
-    .then((result) => {
+  pairInflight = (async () => {
+    try {
+      const result = await browser.storage.local.get([AUTH_KEY, PREFS_KEY]);
       if (authCache === undefined) authCache = parseAuth(result[AUTH_KEY]);
       if (prefsCache === undefined) prefsCache = parsePrefs(result[PREFS_KEY]);
       return { auth: authCache, prefs: prefsCache as ExtensionPrefs };
-    })
-    .finally(() => {
+    } finally {
       pairInflight = null;
-    });
+    }
+  })();
   return pairInflight;
 }
 

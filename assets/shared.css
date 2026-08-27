@@ -32,6 +32,9 @@
     "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-serif: "Source Serif 4", "Iowan Old Style", "Source Serif Pro",
     "Georgia", "Songti SC", "Noto Serif SC", serif;
+
+  color-scheme: light dark;
+  accent-color: var(--primary);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -464,4 +467,16 @@ select {
   .btn:active:not(:disabled) {
     transform: none;
   }
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
