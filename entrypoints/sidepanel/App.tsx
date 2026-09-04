@@ -14,12 +14,13 @@ import { isRtlLanguage, LANGUAGES, languageLabel } from "@/lib/languages";
 import { consumeRuntimeLastError, safePortPost, sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
-import { subscribeAuthChange } from "@/lib/storage";
+import { getTranslateDraft, setTranslateDraft, subscribeAuthChange } from "@/lib/storage";
 import { MAX_TRANSLATE_CHARS } from "@/types";
 
 const SettingsView = lazy(() => import("@/components/SettingsView"));
 
 const DEBOUNCE_MS = 280;
+const DRAFT_PERSIST_MS = 400;
 
 type View = "translate" | "settings";
 
@@ -64,6 +65,12 @@ export default function App() {
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRef = useRef<() => Promise<ExtensionState | null>>(async () => null);
   const reloadModelsRef = useRef<() => Promise<unknown>>(async () => {});
+  const draftReadyRef = useRef(false);
+  const translateDraftRef = useRef({
+    sourceText: "",
+    translatedText: "",
+    detectedSourceLang: null as string | null,
+  });
 
   const refresh = useCallback(async () => {
     const local = await readExtensionState();
@@ -79,6 +86,11 @@ export default function App() {
 
   refreshRef.current = refresh;
   reloadModelsRef.current = reloadModels;
+  translateDraftRef.current = {
+    sourceText,
+    translatedText,
+    detectedSourceLang,
+  };
   queuePaintRef.current = () => {
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
@@ -97,9 +109,13 @@ export default function App() {
     void sendBg({ type: "warmup" });
     let cancelled = false;
     void (async () => {
-      const local = await readExtensionState();
+      const [local, draft] = await Promise.all([readExtensionState(), getTranslateDraft()]);
       if (cancelled) return;
       setState(local);
+      setSourceText(draft.sourceText);
+      setTranslatedText(draft.translatedText);
+      setDetectedSourceLang(draft.detectedSourceLang);
+      draftReadyRef.current = true;
       const res = await sendBg<ExtensionState>({ type: "me" });
       if (!cancelled && res.ok && res.data) setState(res.data);
     })();
@@ -109,6 +125,31 @@ export default function App() {
     return () => {
       cancelled = true;
       unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!draftReadyRef.current || translating) return;
+    const timer = setTimeout(() => {
+      void setTranslateDraft(translateDraftRef.current);
+    }, DRAFT_PERSIST_MS);
+    return () => clearTimeout(timer);
+  }, [sourceText, translatedText, detectedSourceLang, translating]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (!draftReadyRef.current) return;
+      void setTranslateDraft(translateDraftRef.current);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
     };
   }, []);
 

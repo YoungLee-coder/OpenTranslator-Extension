@@ -12,8 +12,14 @@ import { sendBg } from "@/lib/messaging";
 import type { ExtensionState } from "@/lib/messaging";
 import { ensureHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
-import { getDraftBaseUrl, setDraftBaseUrl, subscribeAuthChange } from "@/lib/storage";
-import type { PingResponse } from "@/types";
+import {
+  clearLoginDraft,
+  getLoginDraft,
+  setLoginDraft,
+  subscribeAuthChange,
+} from "@/lib/storage";
+import { userLoginName, type PingResponse } from "@/types";
+import { normalizeUsername } from "@/lib/username";
 import "./settings.css";
 
 type SettingsViewProps = {
@@ -30,7 +36,7 @@ export default function SettingsView({
   onLoginSuccess,
 }: SettingsViewProps) {
   const [baseUrl, setBaseUrl] = useState("");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [state, setState] = useState<ExtensionState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,12 +52,14 @@ export default function SettingsView({
     async (data: ExtensionState) => {
       setState(data);
       onStateChange?.(data);
-      if (data.baseUrl) {
-        setBaseUrl(data.baseUrl);
-      } else {
-        const draft = await getDraftBaseUrl();
-        if (draft) setBaseUrl(draft);
+      if (data.bound) {
+        if (data.baseUrl) setBaseUrl(data.baseUrl);
+        if (data.user) setUsername(userLoginName(data.user));
+        return;
       }
+      const draft = await getLoginDraft();
+      setBaseUrl(data.baseUrl || draft.baseUrl);
+      setUsername(data.user ? userLoginName(data.user) : draft.username);
     },
     [onStateChange],
   );
@@ -140,7 +148,11 @@ export default function SettingsView({
       }
       const hint = pingSetupHint(data);
       setPingHint(hint ?? "");
-      await setDraftBaseUrl(baseUrl.trim());
+      try {
+        await setLoginDraft({ baseUrl: baseUrl.trim(), username });
+      } catch {
+        // ping succeeded; draft can be retried on the next edit
+      }
     } catch (err) {
       resetPingState();
       setError(err instanceof Error ? err.message : String(err));
@@ -151,8 +163,13 @@ export default function SettingsView({
 
   const handleLogin = async () => {
     clearMessages();
-    if (!email || !password) {
-      setError("请填写邮箱和密码");
+    const loginName = normalizeUsername(username);
+    if (!username.trim() || !password) {
+      setError("请填写用户名和密码");
+      return;
+    }
+    if (!loginName) {
+      setError("用户名为 2–64 个字符，且不能包含空格");
       return;
     }
     setBusy(true);
@@ -162,14 +179,13 @@ export default function SettingsView({
         setError("需要授予访问该实例的权限");
         return;
       }
-      const res = await sendBg({ type: "login", baseUrl, email, password });
+      const res = await sendBg({ type: "login", baseUrl, username: loginName, password });
       if (!res.ok) {
         setError(formatApiError(res.error, res.status, res.kind));
         return;
       }
       setPassword("");
       setSuccess("登录成功，已绑定实例");
-      await setDraftBaseUrl("");
       await refresh();
       onLoginSuccess?.();
     } catch (err) {
@@ -205,6 +221,7 @@ export default function SettingsView({
   const handleChangeInstance = async () => {
     clearMessages();
     setBusy(true);
+    await clearLoginDraft();
     try {
       await sendBg({ type: "logout" });
     } catch {
@@ -213,7 +230,7 @@ export default function SettingsView({
     setBusy(false);
     resetPingState();
     setBaseUrl("");
-    setEmail("");
+    setUsername("");
     setPassword("");
     await refresh();
   };
@@ -247,10 +264,25 @@ export default function SettingsView({
     }
   };
 
+  const persistLoginDraft = (nextBaseUrl: string, nextUsername: string) => {
+    void (async () => {
+      try {
+        await setLoginDraft({ baseUrl: nextBaseUrl, username: nextUsername });
+      } catch {
+        // quota / unavailable — next successful write restores it
+      }
+    })();
+  };
+
   const handleBaseUrlChange = (value: string) => {
     setBaseUrl(value);
     resetPingState();
-    void setDraftBaseUrl(value);
+    persistLoginDraft(value, username);
+  };
+
+  const handleUsernameChange = (value: string) => {
+    setUsername(value);
+    persistLoginDraft(baseUrl, value);
   };
 
   const rootClass = [
@@ -327,7 +359,7 @@ export default function SettingsView({
           <SettingsInstanceSetup
             variant={variant}
             baseUrl={baseUrl}
-            email={email}
+            username={username}
             password={password}
             busy={busy}
             pingBusy={pingBusy}
@@ -338,7 +370,7 @@ export default function SettingsView({
             error={error}
             success={success}
             onBaseUrlChange={handleBaseUrlChange}
-            onEmailChange={setEmail}
+            onUsernameChange={handleUsernameChange}
             onPasswordChange={setPassword}
             onTestConnection={() => void handleTestConnection()}
             onFormSubmit={handleFormSubmit}

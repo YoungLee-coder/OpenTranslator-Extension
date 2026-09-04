@@ -7,8 +7,8 @@ import type { BgRequest, BgResponse, ExtensionState, TranslatePortIn, TranslateP
 import { consumeRuntimeLastError, parseBgRequest, parseTranslatePortIn, safePortPost } from "@/lib/messaging";
 import { revokeHostPermission } from "@/lib/permissions";
 import { readExtensionState } from "@/lib/state";
-import { clearAuth, getAuth, getAuthAndPrefs, setAuth, setPrefs } from "@/lib/storage";
-import type { AiExpertsPublicResponse, ExtensionAuth, TranslateModelsResponse } from "@/types";
+import { clearAuth, getAuth, getAuthAndPrefs, setAuth, setLoginDraft, setPrefs } from "@/lib/storage";
+import { userLoginName, type AiExpertsPublicResponse, type ExtensionAuth, type TranslateModelsResponse } from "@/types";
 import { normalizeBaseUrl } from "@/lib/url";
 
 const SESSION_ALARM = "session-check";
@@ -190,7 +190,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
       case "login": {
         const baseUrl = normalizeBaseUrl(request.baseUrl);
         const data = await login(baseUrl, {
-          email: request.email,
+          username: request.username,
           password: request.password,
         });
         const auth: ExtensionAuth = {
@@ -454,6 +454,15 @@ export default defineBackground(() => {
         }
         deltas.drain();
         if (err instanceof ApiError) {
+          if (err.status === 403 && /forbidden/i.test(err.message)) {
+            post({
+              type: "error",
+              requestId,
+              error: "当前账号无权翻译",
+              status: err.status,
+            });
+            return;
+          }
           if (err.status === 401 || err.status === 403) {
             await clearAuth();
             await clearAuthCaches();
@@ -520,7 +529,13 @@ export default defineBackground(() => {
   void (async () => {
     try {
       const { auth } = await getAuthAndPrefs();
-      if (auth) prefetchModelsCatalog(auth);
+      if (auth) {
+        prefetchModelsCatalog(auth);
+        await setLoginDraft({
+          baseUrl: auth.baseUrl,
+          username: userLoginName(auth.user),
+        });
+      }
     } catch {
       // ignore
     }

@@ -8,6 +8,8 @@ export function formatApiError(
   if (kind === "cors" || kind === "timeout" || kind === "disconnected") return error;
   if (status === 403) {
     if (/private/i.test(error)) return "站点为私有模式，请先登录";
+    if (/disabled/i.test(error)) return "账号已被停用";
+    if (/forbidden/i.test(error)) return "当前账号无权翻译";
     return error || "无权访问";
   }
   if (status === 429) {

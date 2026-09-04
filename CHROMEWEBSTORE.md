@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — OpenTranslator
 
-> Last Updated: 2026-08-27
+> Last Updated: 2026-09-04
 
 ## Store Listing
 
@@ -13,7 +13,7 @@ OpenTranslator
 **Detailed Description** [REQUIRED]
 OpenTranslator 在 Chrome 侧边栏里连接你自己部署的翻译服务，把输入或粘贴的文本译成目标语言。
 
-打开侧边栏后填写实例地址并登录。选择源语言和目标语言，输入或粘贴文本后会自动开始翻译，译文随输入逐步显示。可以复制译文、互换语言、选择翻译模型和 AI 专家。设置也可在扩展选项页完成。
+打开侧边栏后填写实例地址并登录。选择源语言和目标语言，输入或粘贴文本后会自动开始翻译，译文随输入逐步显示。可以复制译文、互换语言、选择翻译模型和 AI 专家。设置也可在扩展选项页完成。关闭再打开侧边栏时，会恢复上次的实例地址、用户名和翻译草稿。
 
 使用步骤：点击工具栏图标打开侧边栏；填写实例地址并测试连接；用账号登录；输入或粘贴文本即可翻译。
 
@@ -56,7 +56,7 @@ Toolbar and store icons: `public/icon/16.png`, `32.png`, `48.png`, `96.png`, `12
 
 | Permission | Type | Justification |
 |------------|------|---------------|
-| storage | permissions | Saves the instance URL, login token, and language/model/expert preferences on this device so the side panel can restore them. |
+| storage | permissions | Saves the instance URL, last-used username, login token, language/model/expert preferences, and a side-panel translation draft on this device so the UI can restore them. |
 | alarms | permissions | Rechecks the login session about every 30 minutes and clears expired credentials. |
 | sidePanel | permissions | Shows the translation UI beside the current page. |
 | http://localhost:8787/* | host_permissions | Lets developers reach a local OpenTranslator instance during setup without an extra permission prompt. |
@@ -71,7 +71,7 @@ Toolbar and store icons: `public/icon/16.png`, `32.png`, `48.png`, `96.png`, `12
 
 | Data Type | Collected? | Transmitted Off-Device? | Purpose | Shared with Third Parties? |
 |-----------|-----------|------------------------|---------|---------------------------|
-| Personally identifiable info | Yes (email shown after login; instance URL) | Yes, to the user's instance only | Sign-in and instance binding | No (only the user's server) |
+| Personally identifiable info | Yes (username shown after login; instance URL) | Yes, to the user's instance only | Sign-in and instance binding | No (only the user's server) |
 | Health info | No | | | |
 | Financial info | No | | | |
 | Authentication info | Yes (password at login; session token stored locally) | Password and token go to the user's instance | Sign in and stay signed in | No (only the user's server) |
@@ -118,6 +118,7 @@ https://github.com/opentranslator/opentranslator
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
+| 2.0.2 | 2026-09-04 | Remember last instance URL, username, and translation draft; sign in with username (email still accepted) | Draft |
 | 2.0.1 | 2026-08-27 | Persist model/expert catalogs across service worker sleep; options open in a tab; accessibility and store listing docs | Draft |
 | 2.0.0 | 2026-08-15 | Removed in-page Gmail translation; side-panel translation against a self-hosted instance | Draft |
 

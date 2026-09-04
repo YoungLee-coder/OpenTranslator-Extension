@@ -60,7 +60,7 @@ export async function loadAvatarBlobUrl(
   }
 }
 
-export function initialsOf(email: string): string {
-  const head = email.split("@")[0] ?? email;
+export function initialsOf(name: string): string {
+  const head = name.includes("@") ? (name.split("@")[0] ?? name) : name;
   return head.slice(0, 2).toUpperCase();
 }

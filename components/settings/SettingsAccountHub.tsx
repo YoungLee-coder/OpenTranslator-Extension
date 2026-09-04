@@ -12,7 +12,7 @@ import { expertLabel, GENERAL_EXPERT_ID } from "@/lib/experts";
 import { languageLabel } from "@/lib/languages";
 import { encodeModelKey, modelOptionLabel } from "@/lib/models";
 import type { ExtensionState } from "@/lib/messaging";
-import type { AiExpertMeta, TranslateModelOption } from "@/types";
+import { userLoginName, type AiExpertMeta, type TranslateModelOption } from "@/types";
 import { formatInstanceHost } from "./utils";
 
 type SettingsAccountHubProps = {
@@ -45,14 +45,15 @@ export default function SettingsAccountHub({
   onLogout,
 }: SettingsAccountHubProps) {
   const showExperts = experts.length > 0;
+  const displayName = userLoginName(state.user!);
 
   return (
     <section className="settings-hub" aria-label="账户与实例">
       <div className="settings-profile">
         <UserAvatar user={state.user!} baseUrl={baseUrl} />
         <div className="settings-profile-meta">
-          <span className="settings-profile-email" title={state.user!.email}>
-            {state.user!.email}
+          <span className="settings-profile-name" title={displayName}>
+            {displayName}
           </span>
           <span className="settings-profile-badge">
             <span className="status-dot" aria-hidden />

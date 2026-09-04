@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { initialsOf, loadAvatarBlobUrl } from "@/lib/avatar";
 import { getAuth } from "@/lib/storage";
-import type { AuthUser } from "@/types";
+import { userLoginName, type AuthUser } from "@/types";
 
 type UserAvatarProps = {
   user: AuthUser;
@@ -45,15 +45,16 @@ export default function UserAvatar({ user, baseUrl, className }: UserAvatarProps
     };
   }, [baseUrl, user.avatarUrl]);
 
+  const displayName = userLoginName(user);
   const classNames = ["settings-avatar", className].filter(Boolean).join(" ");
 
   return (
     <span className={classNames}>
       {avatarSrc ? (
-        <img className="settings-avatar-img" src={avatarSrc} alt={user.email} />
+        <img className="settings-avatar-img" src={avatarSrc} alt={displayName} />
       ) : (
         <span className="settings-avatar-initials" aria-hidden>
-          {initialsOf(user.email)}
+          {initialsOf(displayName)}
         </span>
       )}
     </span>

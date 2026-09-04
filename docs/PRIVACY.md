@@ -1,30 +1,30 @@
 # Privacy Policy for OpenTranslator
 
-Last updated: 2026-08-27
+Last updated: 2026-09-04
 
 OpenTranslator is a Chrome extension that talks only to the OpenTranslator instance **you** configure. There is no vendor cloud, analytics, or advertising.
 
 ## What Data We Collect
 
 - **Instance address** — the URL of your self-hosted OpenTranslator service, so the extension can connect to it.
-- **Account credentials** — email and password are sent to your instance at login. The password is not stored in the extension after login.
+- **Account credentials** — username (which may be an email) and password are sent to your instance at login. The password is not stored in the extension. The last instance URL and username are kept on this device so the login form can be restored.
 - **Session token and account profile** — returned by your instance after login, used to keep you signed in and show your account.
 - **Language, model, and expert preferences** — so the side panel can restore your last translation settings.
-- **Text you type or paste to translate** — sent to your instance only when you use the side panel to translate.
+- **Text you type or paste to translate** — sent to your instance only when you use the side panel to translate. A local draft of that text is kept on this device so reopening the side panel can restore it.
 
 The extension does not read web-page content, browsing history, cookies, or other tabs.
 
 ## How Data Is Stored
 
-Instance address, session token, account profile, language/model/expert preferences, and a draft instance URL are stored on this device in Chrome local storage. They are not synced to other devices and are not sent to the extension author.
+Instance address, last-used username, session token, account profile, language/model/expert preferences, and a draft of the side-panel translation text are stored on this device in Chrome local storage. They are not synced to other devices and are not sent to the extension author. The login password is not stored.
 
 ## How Data Is Used
 
 - Instance address and host permission: connect to the service you chose.
-- Email and password: sign in to that service.
+- Username and password: sign in to that service. Last-used username stays on this device to restore the login form.
 - Session token: authenticated API calls (session check, model list, translation).
 - Preferences: restore languages, model, and expert in the side panel.
-- Source text: produce a translation on your instance.
+- Source text: produce a translation on your instance; a local draft restores it when the side panel reopens.
 
 ## Third-Party Services
 
@@ -36,7 +36,7 @@ The extension author does not receive, sell, or share your data. Text and login 
 
 ## Data Retention and Deletion
 
-Local data stays on this device until you sign out, switch instance, or remove the extension. Sign out clears the stored token and account, and drops optional host access for that instance. Uninstalling the extension removes remaining local storage.
+Local data stays on this device until you sign out, switch instance, or remove the extension. Sign out clears the stored token and account; the last instance URL and username remain so you can sign in again without retyping them. Switching instance clears the saved login form. Uninstalling the extension removes remaining local storage.
 
 ## Changes to This Policy
 

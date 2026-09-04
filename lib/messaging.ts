@@ -7,7 +7,7 @@ import type {
 
 export type BgRequest =
   | { type: "ping"; baseUrl: string }
-  | { type: "login"; baseUrl: string; email: string; password: string }
+  | { type: "login"; baseUrl: string; username: string; password: string }
   | { type: "me" }
   | { type: "logout" }
   | { type: "getState" }
@@ -51,12 +51,12 @@ export function parseBgRequest(value: unknown): BgRequest | null {
       return typeof value.baseUrl === "string" ? { type: "ping", baseUrl: value.baseUrl } : null;
     case "login":
       return typeof value.baseUrl === "string" &&
-        typeof value.email === "string" &&
+        typeof value.username === "string" &&
         typeof value.password === "string"
         ? {
             type: "login",
             baseUrl: value.baseUrl,
-            email: value.email,
+            username: value.username,
             password: value.password,
           }
         : null;

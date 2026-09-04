@@ -6,7 +6,7 @@ import { formatBindings } from "./utils";
 type SettingsInstanceSetupProps = {
   variant: "sidepanel" | "page";
   baseUrl: string;
-  email: string;
+  username: string;
   password: string;
   busy: boolean;
   pingBusy: boolean;
@@ -17,7 +17,7 @@ type SettingsInstanceSetupProps = {
   error: string;
   success: string;
   onBaseUrlChange: (value: string) => void;
-  onEmailChange: (value: string) => void;
+  onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onTestConnection: () => void;
   onFormSubmit: (e: React.FormEvent) => void;
@@ -26,7 +26,7 @@ type SettingsInstanceSetupProps = {
 export default function SettingsInstanceSetup({
   variant,
   baseUrl,
-  email,
+  username,
   password,
   busy,
   pingBusy,
@@ -37,7 +37,7 @@ export default function SettingsInstanceSetup({
   error,
   success,
   onBaseUrlChange,
-  onEmailChange,
+  onUsernameChange,
   onPasswordChange,
   onTestConnection,
   onFormSubmit,
@@ -130,15 +130,20 @@ export default function SettingsInstanceSetup({
           <div className="settings-step-body">
             <span className="settings-step-label">账号登录</span>
             <div className="field">
-              <label htmlFor="email">邮箱</label>
+              <label htmlFor="username">用户名</label>
               <input
-                id="email"
+                id="username"
                 name="username"
-                type="email"
+                type="text"
                 autoComplete="username"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 required
-                value={email}
-                onChange={(e) => onEmailChange(e.target.value)}
+                minLength={2}
+                maxLength={64}
+                value={username}
+                onChange={(e) => onUsernameChange(e.target.value)}
               />
             </div>
             <div className="field">
@@ -160,7 +165,9 @@ export default function SettingsInstanceSetup({
             >
               {busy ? "提交中…" : "登录并绑定"}
             </button>
-            <p className="muted settings-hint">填写完成后按 Enter 登录</p>
+            <p className="muted settings-hint">
+              填写完成后按 Enter 登录。用户名可用邮箱或任意登录名，会和实例地址一起留在本机；密码不会保存
+            </p>
           </div>
         </div>
       </div>

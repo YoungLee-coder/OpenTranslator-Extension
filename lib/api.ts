@@ -1,12 +1,13 @@
-import type {
-  AiExpertsPublicResponse,
-  AuthMeResponse,
-  AuthSessionResponse,
-  LoginRequest,
-  PingResponse,
-  TranslateModelsResponse,
-  TranslateRequest,
-  TranslateStreamEvent,
+import {
+  userLoginName,
+  type AiExpertsPublicResponse,
+  type AuthMeResponse,
+  type AuthSessionResponse,
+  type LoginRequest,
+  type PingResponse,
+  type TranslateModelsResponse,
+  type TranslateRequest,
+  type TranslateStreamEvent,
 } from "@/types";
 import {
   followAbortSignal,
@@ -134,16 +135,23 @@ export async function login(
   signal?: AbortSignal,
 ): Promise<AuthSessionResponse> {
   try {
+    const username = body.username || body.email;
+    if (!username) {
+      throw new ApiError(400, "请填写用户名和密码");
+    }
     const res = await apiFetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ username, email: username, password: body.password }),
       signal,
     });
     if (!res.ok) {
       const msg = await readErrorMessage(res);
       if (res.status === 401) {
-        throw new ApiError(401, "邮箱或密码错误");
+        throw new ApiError(401, "用户名或密码错误");
+      }
+      if (res.status === 403 && /disabled/i.test(msg)) {
+        throw new ApiError(403, "账号已被停用");
       }
       if (res.status === 403 && /private/i.test(msg)) {
         throw new ApiError(403, "站点为私有模式，请先登录");
@@ -151,10 +159,14 @@ export async function login(
       throw new ApiError(res.status, msg);
     }
     const data = await readJson<AuthSessionResponse>(res);
-    if (!data?.token || !data.user?.id) {
+    const loginName = data?.user ? userLoginName(data.user) : "";
+    if (!data?.token || !data.user?.id || !loginName) {
       throw new ApiError(0, "登录响应无效");
     }
-    return data;
+    return {
+      ...data,
+      user: { ...data.user, username: loginName, email: data.user.email || loginName },
+    };
   } catch (err) {
     throw wrapFetchError(err);
   }

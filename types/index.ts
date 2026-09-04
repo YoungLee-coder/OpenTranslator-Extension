@@ -2,14 +2,26 @@
 
 export interface AuthUser {
   id: string;
-  email: string;
+  /** Login name; may be an email or a plain username. */
+  username: string;
+  /**
+   * Same as username. Kept for older stored sessions.
+   * @deprecated use username
+   */
+  email?: string;
   role: string;
   avatarUrl?: string;
 }
 
+export function userLoginName(user: { username?: string; email?: string }): string {
+  return user.username || user.email || "";
+}
+
 export interface LoginRequest {
-  email: string;
   password: string;
+  username?: string;
+  /** @deprecated same as username */
+  email?: string;
 }
 
 export interface AuthSessionResponse {
