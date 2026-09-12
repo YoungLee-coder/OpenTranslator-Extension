@@ -11,6 +11,7 @@ export async function readExtensionState(): Promise<ExtensionState> {
       targetLang: prefs.targetLang,
       modelKey: prefs.modelKey ?? null,
       expertId: prefs.expertId ?? "general",
+      restoreDraft: prefs.restoreDraft,
     };
   }
   return {
@@ -21,5 +22,6 @@ export async function readExtensionState(): Promise<ExtensionState> {
     targetLang: prefs.targetLang,
     modelKey: prefs.modelKey ?? null,
     expertId: prefs.expertId ?? "general",
+    restoreDraft: prefs.restoreDraft,
   };
 }

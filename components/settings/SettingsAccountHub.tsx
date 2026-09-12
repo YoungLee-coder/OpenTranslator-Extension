@@ -4,6 +4,7 @@ import {
   ExternalLink,
   Languages,
   LogOut,
+  RotateCcw,
   Server,
   Sparkles,
 } from "lucide-react";
@@ -26,6 +27,7 @@ type SettingsAccountHubProps = {
   busy: boolean;
   onModelChange: (modelKey: string) => void;
   onExpertChange: (expertId: string) => void;
+  onRestoreDraftChange: (restoreDraft: boolean) => void;
   onChangeInstance: () => void;
   onLogout: () => void;
 };
@@ -41,6 +43,7 @@ export default function SettingsAccountHub({
   busy,
   onModelChange,
   onExpertChange,
+  onRestoreDraftChange,
   onChangeInstance,
   onLogout,
 }: SettingsAccountHubProps) {
@@ -148,6 +151,28 @@ export default function SettingsAccountHub({
             <span>{languageLabel(state.sourceLang)}</span>
             <ArrowRight size={12} strokeWidth={1.75} aria-hidden />
             <span>{languageLabel(state.targetLang)}</span>
+          </dd>
+        </div>
+        <div className="settings-row">
+          <dt
+            className="settings-row-label"
+            title="开启后，再次打开侧栏会恢复上次的原文与译文；关闭后每次打开都是空白。"
+          >
+            <RotateCcw size={14} strokeWidth={1.75} aria-hidden />
+            恢复上次翻译
+          </dt>
+          <dd className="settings-row-value settings-row-switch">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state.restoreDraft}
+              aria-label="恢复上次翻译内容"
+              className="settings-switch"
+              onClick={() => onRestoreDraftChange(!state.restoreDraft)}
+              disabled={busy}
+            >
+              <span className="settings-switch-thumb" aria-hidden />
+            </button>
           </dd>
         </div>
       </dl>

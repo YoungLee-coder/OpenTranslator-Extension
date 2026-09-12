@@ -14,7 +14,12 @@ import { isRtlLanguage, LANGUAGES, languageLabel } from "@/lib/languages";
 import { consumeRuntimeLastError, safePortPost, sendBg } from "@/lib/messaging";
 import type { ExtensionState, TranslatePortOut } from "@/lib/messaging";
 import { readExtensionState } from "@/lib/state";
-import { getTranslateDraft, setTranslateDraft, subscribeAuthChange } from "@/lib/storage";
+import {
+  clearTranslateDraft,
+  getTranslateDraft,
+  setTranslateDraft,
+  subscribeAuthChange,
+} from "@/lib/storage";
 import { MAX_TRANSLATE_CHARS } from "@/types";
 
 const SettingsView = lazy(() => import("@/components/SettingsView"));
@@ -66,6 +71,7 @@ export default function App() {
   const refreshRef = useRef<() => Promise<ExtensionState | null>>(async () => null);
   const reloadModelsRef = useRef<() => Promise<unknown>>(async () => {});
   const draftReadyRef = useRef(false);
+  const restoreDraftRef = useRef(false);
   const translateDraftRef = useRef({
     sourceText: "",
     translatedText: "",
@@ -86,6 +92,7 @@ export default function App() {
 
   refreshRef.current = refresh;
   reloadModelsRef.current = reloadModels;
+  restoreDraftRef.current = state?.restoreDraft ?? false;
   translateDraftRef.current = {
     sourceText,
     translatedText,
@@ -112,9 +119,14 @@ export default function App() {
       const [local, draft] = await Promise.all([readExtensionState(), getTranslateDraft()]);
       if (cancelled) return;
       setState(local);
-      setSourceText(draft.sourceText);
-      setTranslatedText(draft.translatedText);
-      setDetectedSourceLang(draft.detectedSourceLang);
+      if (local.restoreDraft) {
+        setSourceText(draft.sourceText);
+        setTranslatedText(draft.translatedText);
+        setDetectedSourceLang(draft.detectedSourceLang);
+      } else {
+        // Opted out of restoring: drop any draft persisted by an older version.
+        void clearTranslateDraft();
+      }
       draftReadyRef.current = true;
       const res = await sendBg<ExtensionState>({ type: "me" });
       if (!cancelled && res.ok && res.data) setState(res.data);
@@ -128,17 +140,27 @@ export default function App() {
     };
   }, []);
 
+  const restoreDraftPref = state?.restoreDraft;
+
+  // "Restore last content" off: never leave a draft on disk (covers toggling the
+  // switch off while the panel is open, and drafts written by older versions).
+  useEffect(() => {
+    if (restoreDraftPref !== false) return;
+    void clearTranslateDraft();
+  }, [restoreDraftPref]);
+
   useEffect(() => {
     if (!draftReadyRef.current || translating) return;
+    if (!restoreDraftRef.current) return;
     const timer = setTimeout(() => {
       void setTranslateDraft(translateDraftRef.current);
     }, DRAFT_PERSIST_MS);
     return () => clearTimeout(timer);
-  }, [sourceText, translatedText, detectedSourceLang, translating]);
+  }, [sourceText, translatedText, detectedSourceLang, translating, restoreDraftPref]);
 
   useEffect(() => {
     const flush = () => {
-      if (!draftReadyRef.current) return;
+      if (!draftReadyRef.current || !restoreDraftRef.current) return;
       void setTranslateDraft(translateDraftRef.current);
     };
     const onVisibility = () => {

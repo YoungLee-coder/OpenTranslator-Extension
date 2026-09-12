@@ -264,6 +264,19 @@ export default function SettingsView({
     }
   };
 
+  const handleRestoreDraftChange = async (restoreDraft: boolean) => {
+    clearMessages();
+    const res = await sendBg<ExtensionState>({ type: "setPrefs", restoreDraft });
+    if (!res.ok) {
+      setError(formatApiError(res.error, res.status, res.kind));
+      return;
+    }
+    if (res.data) {
+      setState(res.data);
+      onStateChange?.(res.data);
+    }
+  };
+
   const persistLoginDraft = (nextBaseUrl: string, nextUsername: string) => {
     void (async () => {
       try {
@@ -351,6 +364,9 @@ export default function SettingsView({
               busy={busy}
               onModelChange={(modelKey) => void handleModelChange(modelKey)}
               onExpertChange={(expertId) => void handleExpertChange(expertId)}
+              onRestoreDraftChange={(restoreDraft) =>
+                void handleRestoreDraftChange(restoreDraft)
+              }
               onChangeInstance={() => void handleChangeInstance()}
               onLogout={() => void handleLogout()}
             />

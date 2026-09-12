@@ -22,6 +22,7 @@ export type BgRequest =
       targetLang?: string;
       modelKey?: string | null;
       expertId?: string | null;
+      restoreDraft?: boolean;
     };
 
 export type BgResponse =
@@ -36,6 +37,8 @@ export interface ExtensionState {
   targetLang: string;
   modelKey: string | null;
   expertId: string;
+  /** Restore the previous source text / translation when the panel reopens. */
+  restoreDraft: boolean;
 }
 
 export type { AiExpertsPublicResponse, TranslateModelsResponse };
@@ -85,12 +88,16 @@ export function parseBgRequest(value: unknown): BgRequest | null {
       ) {
         return null;
       }
+      if (value.restoreDraft !== undefined && typeof value.restoreDraft !== "boolean") {
+        return null;
+      }
       return {
         type: "setPrefs",
         sourceLang: value.sourceLang,
         targetLang: value.targetLang,
         modelKey: value.modelKey,
         expertId: value.expertId,
+        restoreDraft: value.restoreDraft,
       };
     }
     default:

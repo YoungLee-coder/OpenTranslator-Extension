@@ -122,4 +122,6 @@ export interface ExtensionPrefs {
   targetLang: string;
   modelKey?: string | null;
   expertId?: string | null;
+  /** Restore the previous source text / translation when the panel reopens. */
+  restoreDraft: boolean;
 }

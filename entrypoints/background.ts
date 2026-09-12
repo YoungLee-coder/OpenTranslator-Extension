@@ -270,6 +270,7 @@ async function handleMessage(request: BgRequest): Promise<BgResponse> {
           targetLang: request.targetLang,
           modelKey: request.modelKey,
           expertId: request.expertId,
+          restoreDraft: request.restoreDraft,
         });
         const state = await readExtensionState();
         return { ok: true, data: state };

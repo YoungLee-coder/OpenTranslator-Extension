@@ -30,6 +30,7 @@ const DEFAULT_PREFS: ExtensionPrefs = {
   targetLang: "zh-CN",
   modelKey: null,
   expertId: "general",
+  restoreDraft: false,
 };
 
 function parseAuthUser(raw: unknown): AuthUser | null {
@@ -63,6 +64,8 @@ function parsePrefs(raw: unknown): ExtensionPrefs {
     targetLang: value.targetLang ?? DEFAULT_PREFS.targetLang,
     modelKey: value.modelKey ?? DEFAULT_PREFS.modelKey,
     expertId: value.expertId ?? DEFAULT_PREFS.expertId,
+    restoreDraft:
+      typeof value.restoreDraft === "boolean" ? value.restoreDraft : DEFAULT_PREFS.restoreDraft,
   };
 }
 
@@ -232,6 +235,7 @@ export async function setPrefs(prefs: Partial<ExtensionPrefs>): Promise<void> {
   if (prefs.targetLang !== undefined) next.targetLang = prefs.targetLang;
   if (prefs.modelKey !== undefined) next.modelKey = prefs.modelKey;
   if (prefs.expertId !== undefined) next.expertId = prefs.expertId;
+  if (prefs.restoreDraft !== undefined) next.restoreDraft = prefs.restoreDraft;
   prefsCache = next;
   await browser.storage.local.set({ [PREFS_KEY]: next });
 }
@@ -266,5 +270,14 @@ export async function setTranslateDraft(draft: TranslateDraft): Promise<void> {
     await browser.storage.local.set({ [TRANSLATE_DRAFT_KEY]: draft });
   } catch {
     // quota / unavailable — next open restores whatever last succeeded
+  }
+}
+
+/** Drop the persisted translation draft (used when "restore last content" is off). */
+export async function clearTranslateDraft(): Promise<void> {
+  try {
+    await browser.storage.local.remove(TRANSLATE_DRAFT_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
   }
 }
